@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>終極大富翁 - 混沌史詩版</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+    import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+    
+    window.fbInit = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, updateDoc, onSnapshot };
+  </script>
+
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    @keyframes pulse-fast { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    @keyframes boss-float { 0%, 100% { transform: translateY(0) scale(1.2); } 50% { transform: translateY(-10px) scale(1.2); } }
+    .god-aura { animation: pulse-fast 1s infinite; }
+    .boss-icon { animation: boss-float 2s infinite ease-in-out; filter: drop-shadow(0 0 10px red); }
+  </style>
+</head>
+<body class="bg-gray-900 min-h-screen text-gray-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, updateDoc, onSnapshot } = window.fbInit;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDFhHbkIGkqPAmXRW2vQ0s-H33qVO2cCKg",
+      authDomain: "money-5ff30.firebaseapp.com",
+      projectId: "money-5ff30",
+      storageBucket: "money-5ff30.firebasestorage.app",
+      messagingSenderId: "392383048631",
+      appId: "1:392383048631:web:ceff00d5e93e2ebc6e5632",
+      measurementId: "G-RWXNKP0H6D"
+    };
+    
+    let app, auth, db;
+    try { app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); } catch(e) {}
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'monopoly-chaos-web';
+
+    const PLAYER_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#EAB308', '#A855F7'];
+    const AVATARS = ['🐕', '🚗', '🎩', '🚢', '👟', '🦖', '🐧', '🚀'];
+    const TURN_LIMIT_MS = 60000;
+
+    const BOARD_SPACES = [
+      { id: 0, name: '起點', type: 'go', description: '經過收集 $200' },
+      { id: 1, name: '地中海大道', type: 'property', color: 'brown', price: 60, houseCost: 50, rent: [2, 10, 30, 90, 160, 250] },
+      { id: 2, name: '社區基金', type: 'community' },
+      { id: 3, name: '波羅的海大道', type: 'property', color: 'brown', price: 60, houseCost: 50, rent: [4, 20, 60, 180, 320, 450] },
+      { id: 4, name: '所得稅', type: 'tax', amount: 200 },
+      { id: 5, name: '雷丁鐵路', type: 'railroad', price: 200 },
+      { id: 6, name: '東方大道', type: 'property', color: 'lightblue', price: 100, houseCost: 50, rent: [6, 30, 90, 270, 400, 550] },
+      { id: 7, name: '機會', type: 'chance' },
+      { id: 8, name: '佛蒙特大道', type: 'property', color: 'lightblue', price: 100, houseCost: 50, rent: [6, 30, 90, 270, 400, 550] },
+      { id: 9, name: '康乃狄克大道', type: 'property', color: 'lightblue', price: 120, houseCost: 50, rent: [8, 40, 100, 300, 450, 600] },
+      { id: 10, name: '監獄', type: 'jail' },
+      { id: 11, name: '聖查爾斯廣場', type: 'property', color: 'pink', price: 140, houseCost: 100, rent: [10, 50, 150, 450, 625, 750] },
+      { id: 12, name: '電力公司', type: 'utility', price: 150 },
+      { id: 13, name: '政治家大道', type: 'property', color: 'pink', price: 140, houseCost: 100, rent: [10, 50, 150, 450, 625, 750] },
+      { id: 14, name: '維吉尼亞大道', type: 'property', color: 'pink', price: 160, houseCost: 100, rent: [12, 60, 180, 500, 700, 900] },
+      { id: 15, name: '賓夕法尼亞鐵路', type: 'railroad', price: 200 },
+      { id: 16, name: '聖詹姆斯廣場', type: 'property', color: 'orange', price: 180, houseCost: 100, rent: [14, 70, 200, 550, 750, 950] },
+      { id: 17, name: '社區基金', type: 'community' },
+      { id: 18, name: '田納西大道', type: 'property', color: 'orange', price: 180, houseCost: 100, rent: [14, 70, 200, 550, 750, 950] },
+      { id: 19, name: '紐約大道', type: 'property', color: 'orange', price: 200, houseCost: 100, rent: [16, 80, 220, 600, 800, 1000] },
+      { id: 20, name: '免費停車', type: 'parking' },
+      { id: 21, name: '肯塔基大道', type: 'property', color: 'red', price: 220, houseCost: 150, rent: [18, 90, 250, 700, 875, 1050] },
+      { id: 22, name: '機會', type: 'chance' },
+      { id: 23, name: '印第安納大道', type: 'property', color: 'red', price: 220, houseCost: 150, rent: [18, 90, 250, 700, 875, 1050] },
+      { id: 24, name: '伊利諾伊大道', type: 'property', color: 'red', price: 240, houseCost: 150, rent: [20, 100, 300, 750, 925, 1100] },
+      { id: 25, name: 'B&O 鐵路', type: 'railroad', price: 200 },
+      { id: 26, name: '大西洋大道', type: 'property', color: 'yellow', price: 260, houseCost: 150, rent: [22, 110, 330, 800, 975, 1150] },
+      { id: 27, name: '文特諾大道', type: 'property', color: 'yellow', price: 260, houseCost: 150, rent: [22, 110, 330, 800, 975, 1150] },
+      { id: 28, name: '自來水廠', type: 'utility', price: 150 },
+      { id: 29, name: '馬文花園', type: 'property', color: 'yellow', price: 280, houseCost: 150, rent: [24, 120, 360, 850, 1025, 1200] },
+      { id: 30, name: '直接入獄', type: 'gotojail' },
+      { id: 31, name: '太平洋大道', type: 'property', color: 'green', price: 300, houseCost: 200, rent: [26, 130, 390, 900, 1100, 1275] },
+      { id: 32, name: '北卡羅萊納大道', type: 'property', color: 'green', price: 300, houseCost: 200, rent: [26, 130, 390, 900, 1100, 1275] },
+      { id: 33, name: '社區基金', type: 'community' },
+      { id: 34, name: '賓夕法尼亞大道', type: 'property', color: 'green', price: 320, houseCost: 200, rent: [28, 150, 450, 1000, 1200, 1400] },
+      { id: 35, name: '短線鐵路', type: 'railroad', price: 200 },
+      { id: 36, name: '機會', type: 'chance' },
+      { id: 37, name: '公園廣場', type: 'property', color: 'blue', price: 350, houseCost: 200, rent: [35, 175, 500, 1100, 1300, 1500] },
+      { id: 38, name: '奢侈稅', type: 'tax', amount: 100 },
+      { id: 39, name: '木板路', type: 'property', color: 'blue', price: 400, houseCost: 200, rent: [50, 200, 600, 1400, 1700, 2000] },
+    ];
+
+    const COLOR_MAP = { brown: '#8B4513', lightblue: '#87CEEB', pink: '#FF69B4', orange: '#FFA500', red: '#FF0000', yellow: '#FFD700', green: '#008000', blue: '#0000FF' };
+    const CARDS = { chance: [{ text: '領取 $200', action: p => { p.money += 200; return '獲得 $200'; } }, { text: '入獄', action: p => { p.position = 10; p.inJail = true; return '入獄'; } }], community: [{ text: '醫療費 $50', action: p => { p.money -= 50; return '扣除 $50'; } }, { text: '繼承 $100', action: p => { p.money += 100; return '獲得 $100'; } }] };
+    const QUEST_TYPES = [
+      { id: 'buy', desc: '購買 2 塊土地', target: 2, reward: { money: 1000, stock: 'tech' } },
+      { id: 'rent_earn', desc: '收租 2 次', target: 2, reward: { money: 1500, stock: 'realEstate' } },
+      { id: 'pass_go', desc: '經過起點 2 次', target: 2, reward: { money: 800, stock: 'tech' } },
+      { id: 'jail', desc: '坐牢 1 次', target: 1, reward: { money: 1200, stock: 'realEstate' } }
+    ];
+
+    const DEFAULT_GAME_STATE = {
+      status: 'lobby', players: [], turnIndex: 0, properties: {}, phase: 'waiting_roll', pendingAction: null, dice: [1, 1], doublesCount: 0,
+      logs: [{ id: Date.now(), text: '房間已創建', time: new Date().toLocaleTimeString() }], chat: [], auction: null,
+      roundCount: 0, stocks: { prices: { tech: 100, realEstate: 100 }, history: { tech: [100], realEstate: [100] } },
+      lottery: { pot: 1000, tickets: [], roundsLeft: 5 }, worldEvent: { type: 'normal', name: '風平浪靜', effect: '無', roundsLeft: 3 },
+      boss: { active: true, name: '末日巨龍', hp: 5000, maxHp: 5000, pos: 20, respawnIn: 0 } // 新增：世界BOSS
+    };
+
+    const sfx = {
+      coin: () => { try { const a=new AudioContext(); const o=a.createOscillator(); o.frequency.value=1200; o.connect(a.destination); o.start(); o.stop(a.currentTime+0.1); }catch(e){} },
+      buzzer: () => { try { const a=new AudioContext(); const o=a.createOscillator(); o.type='sawtooth'; o.frequency.value=150; o.connect(a.destination); o.start(); o.stop(a.currentTime+0.3); }catch(e){} }
+    };
+
+    function App() {
+      const [user, setUser] = useState(null);
+      const [roomId, setRoomId] = useState('');
+      const [inputRoomCode, setInputRoomCode] = useState('');
+      const [gameState, setGameState] = useState(null);
+      const [playerName, setPlayerName] = useState('');
+      const [playerAvatar, setPlayerAvatar] = useState(AVATARS[0]);
+      const [showExpansionModal, setShowExpansionModal] = useState(false);
+      const [showManageModal, setShowManageModal] = useState(false);
+      const [modalConfig, setModalConfig] = useState({ show: false, msg: '', customRender: null });
+      const [chatInput, setChatInput] = useState('');
+      const chatEndRef = useRef(null);
+
+      const showAlert = (msg) => setModalConfig({ show: true, msg });
+      const closeModal = () => setModalConfig({ show: false, msg: '', customRender: null });
+      const logMsg = (state, text) => ({ logs: [...state.logs, { id: Date.now()+Math.random(), text, time: new Date().toLocaleTimeString() }].slice(-100) });
+
+      useEffect(() => {
+        if (!auth) return;
+        const initAuth = async () => { 
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            try {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } catch (error) {
+              console.warn("自訂 Token 驗證失敗 (因為更換了 Firebase Config)，切換為匿名登入:", error);
+              await signInAnonymously(auth);
+            }
+          } else {
+            await signInAnonymously(auth);
+          }
+        };
+        initAuth();
+        const unsub = onAuthStateChanged(auth, setUser);
+        return () => unsub();
+      }, []);
+
+      useEffect(() => {
+        if (!user || !roomId || !db) return;
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`);
+        const unsub = onSnapshot(roomRef, snap => { if (snap.exists()) setGameState(snap.data()); else setDoc(roomRef, DEFAULT_GAME_STATE).catch(console.error); });
+        return () => unsub();
+      }, [user, roomId]);
+
+      useEffect(() => { chatEndRef.current?.scrollIntoView(); }, [gameState?.chat]);
+
+      const updateGame = async (updates) => {
+        if (!user || !roomId) return;
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`), updates).catch(console.error);
+      };
+
+      const handleCreateRoom = () => { if(playerName) setRoomId(Math.random().toString(36).substring(2, 6).toUpperCase()); };
+      const handleJoinRoom = () => { if(playerName && inputRoomCode) setRoomId(inputRoomCode.toUpperCase()); };
+
+      const joinGameSlot = async () => {
+        if (gameState.players.find(p => p.id === user.uid) || gameState.players.length >= 5 || gameState.status !== 'lobby') return;
+        const initialQuest = QUEST_TYPES[Math.floor(Math.random() * QUEST_TYPES.length)];
+        const newPlayer = {
+          id: user.uid, name: playerName.trim(), color: PLAYER_COLORS[gameState.players.length], avatar: playerAvatar,
+          money: 1500, position: 0, inJail: false, jailTurns: 0, isBankrupt: false,
+          stocksOwned: { tech: 0, realEstate: 0 }, talents: [], god: null,
+          items: { remoteDice: 0, turtle: 0 }, // 裝備/道具背包
+          quest: { ...initialQuest, progress: 0 }, // 賞金任務
+          statusEffects: { turtleTurns: 0, nextRoll: null } // 異常狀態
+        };
+        await updateGame({ players: [...gameState.players, newPlayer], ...logMsg(gameState, `${newPlayer.name} 加入了房間。`) });
+      };
+
+      const startGame = async () => await updateGame({ status: 'playing', turnStartTime: Date.now(), ...logMsg(gameState, '遊戲開始！') });
+
+      // 追蹤任務進度
+      const updateQuest = (player, type, count=1, oldLogs) => {
+        if(!player.quest || player.quest.id !== type) return { p: player, logs: oldLogs };
+        player.quest.progress += count;
+        let newLogs = oldLogs;
+        if(player.quest.progress >= player.quest.target) {
+           player.money += player.quest.reward.money;
+           player.stocksOwned[player.quest.reward.stock] += 10;
+           newLogs = logMsg({logs: newLogs}, `📜 ${player.name} 完成了任務！獲得 $${player.quest.reward.money} 與 10股股票！`).logs;
+           player.quest = { ...QUEST_TYPES[Math.floor(Math.random() * QUEST_TYPES.length)], progress: 0 }; // 派發新任務
+           sfx.coin();
+        }
+        return { p: player, logs: newLogs };
+      };
+
+      const passTurnToNext = (currentState) => {
+        let nextTurn = currentState.turnIndex; let roundWrapped = false; let safeguard = 0;
+        do { nextTurn = (nextTurn + 1) % currentState.players.length; if (nextTurn === 0) roundWrapped = true; safeguard++; } while (currentState.players[nextTurn].isBankrupt && safeguard < 10);
+
+        let updates = { turnIndex: nextTurn, phase: 'waiting_roll', doublesCount: 0, pendingAction: null, players: [...currentState.players], logs: currentState.logs };
+
+        if (roundWrapped) {
+           updates.roundCount = (currentState.roundCount || 0) + 1;
+           // 1. 神明回合扣除 & 烏龜卡扣除
+           updates.players = updates.players.map(p => {
+             if (p.god) { p.god.duration--; if (p.god.duration <= 0) p.god = null; }
+             if (p.statusEffects?.turtleTurns > 0) p.statusEffects.turtleTurns--;
+             return p;
+           });
+           // 2. 股市波動
+           let st = currentState.stocks || { prices: { tech: 100, realEstate: 100 }, history: { tech: [100], realEstate: [100] } };
+           updates.stocks = { prices: { tech: Math.max(10, Math.floor(st.prices.tech * (1 + (Math.random()*0.4-0.2)))), realEstate: Math.max(10, Math.floor(st.prices.realEstate * (1 + (Math.random()*0.4-0.2)))) }, history: st.history };
+           // 3. 世界BOSS行動
+           let boss = currentState.boss || { active: true, name: '末日巨龍', hp: 5000, maxHp: 5000, pos: 20, respawnIn: 0 };
+           if (boss.active) {
+              boss.pos = (boss.pos + Math.floor(Math.random() * 6) + 1) % 40;
+              let prop = currentState.properties[boss.pos];
+              if (prop && prop.houses > 0 && !prop.isLandmark) {
+                 updates.properties = { ...currentState.properties, [boss.pos]: { ...prop, houses: prop.houses - 1 } };
+                 updates.logs = logMsg({logs: updates.logs}, `🔥 世界BOSS 摧毀了 ${BOARD_SPACES[boss.pos].name} 的 1 棟房子！`).logs;
+              }
+           } else if (boss.respawnIn > 0) {
+              boss.respawnIn--;
+              if (boss.respawnIn === 0) { boss.active = true; boss.hp = boss.maxHp; updates.logs = logMsg({logs: updates.logs}, `🐉 末日巨龍再次降臨棋盤！`).logs; }
+           }
+           updates.boss = boss;
+        }
+        return updates;
+      };
+
+      const calculateRent = (space, propData, payer, owner, diceSum) => {
+        let rent = space.type === 'property' ? space.rent[propData.houses || 0] : (space.type === 'utility' ? diceSum*4 : 25);
+        if(propData.isLandmark) rent = space.rent[5] * 2; // 奇觀地標租金翻倍
+        if(gameState.worldEvent?.type === 'boom') rent *= 1.5; if(gameState.worldEvent?.type === 'crash') rent *= 0.5;
+        if(owner.talents?.includes('charisma')) rent *= 1.3; if(payer.talents?.includes('negotiator')) rent *= 0.7;
+        if(payer.god?.type === 'poverty') rent *= 2; if(payer.god?.type === 'wealth') rent = 0;
+        return Math.ceil(rent);
+      };
+
+      const executeRoll = async (d1, d2) => {
+        let pIndex = gameState.turnIndex; let playerUpdates = [...gameState.players]; let player = { ...playerUpdates[pIndex] };
+        let newLogs = gameState.logs; let stateUpdates = { dice: [d1, d2] };
+
+        // 清除遙控骰子狀態
+        if (player.statusEffects?.nextRoll) player.statusEffects.nextRoll = null;
+
+        if (player.inJail) {
+          if (d1 === d2) { player.inJail = false; player.jailTurns = 0; }
+          else { player.jailTurns++; if(player.jailTurns >= 3) { player.money -= 50; player.inJail = false; player.jailTurns = 0; } else { playerUpdates[pIndex] = player; await updateGame({ ...stateUpdates, ...passTurnToNext({ ...gameState, players: playerUpdates }), players: playerUpdates }); return; } }
+        }
+
+        const oldPos = player.position; player.position = (oldPos + d1 + d2) % 40;
+        if (player.position < oldPos && player.position !== 10) { 
+           player.money += 200; sfx.coin(); 
+           let qRes = updateQuest(player, 'pass_go', 1, newLogs); player = qRes.p; newLogs = qRes.logs;
+        }
+
+        const space = BOARD_SPACES[player.position];
+        newLogs = logMsg({logs: newLogs}, `${player.name} 停在 ${space.name}。`).logs;
+        stateUpdates.phase = 'must_action';
+
+        if (['property', 'railroad', 'utility'].includes(space.type)) {
+          const propData = gameState.properties[space.id];
+          if (!propData || !propData.ownerId) {
+            stateUpdates.pendingAction = { type: 'buy', spaceId: space.id, amount: player.god?.type==='land' ? space.price/2 : space.price };
+          } else if (propData.ownerId !== player.id && !propData.isMortgaged) {
+            const ownerPlayer = gameState.players.find(p => p.id === propData.ownerId);
+            const rent = calculateRent(space, propData, player, ownerPlayer, d1+d2);
+            if (rent > 0) stateUpdates.pendingAction = { type: 'rent', to: propData.ownerId, amount: rent, spaceId: space.id };
+            else stateUpdates.phase = 'end_turn';
+          } else stateUpdates.phase = 'end_turn';
+        } else if (space.type === 'tax') { stateUpdates.pendingAction = { type: 'tax', amount: space.amount }; }
+        else if (space.type === 'gotojail') { 
+          player.position = 10; player.inJail = true; 
+          let qRes = updateQuest(player, 'jail', 1, newLogs); player = qRes.p; newLogs = qRes.logs;
+          stateUpdates = { ...stateUpdates, ...passTurnToNext({ ...gameState, players: playerUpdates }) }; 
+        }
+        else stateUpdates.phase = 'end_turn';
+
+        playerUpdates[pIndex] = player;
+        await updateGame({ ...stateUpdates, players: playerUpdates, logs: newLogs });
+      };
+
+      const rollDice = () => {
+        let p = gameState.players[gameState.turnIndex];
+        if (p.statusEffects?.nextRoll) {
+           // 遙控骰子觸發
+           executeRoll(Math.floor(p.statusEffects.nextRoll/2), Math.ceil(p.statusEffects.nextRoll/2));
+        } else if (p.statusEffects?.turtleTurns > 0) {
+           // 烏龜卡觸發
+           executeRoll(1, 0);
+        } else {
+           if (gameState.phase === 'select_dice') return; // 等待選擇
+           sfx.coin(); executeRoll(Math.floor(Math.random()*6)+1, Math.floor(Math.random()*6)+1);
+        }
+      };
+
+      const buyProperty = async () => {
+        const { spaceId, amount } = gameState.pendingAction; let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex];
+        if (p.money < amount) return showAlert("資金不足！");
+        p.money -= amount; sfx.coin();
+        let newLogs = logMsg(gameState, `${p.name} 購買了 ${BOARD_SPACES[spaceId].name}`).logs;
+        let qRes = updateQuest(p, 'buy', 1, newLogs); p = qRes.p; newLogs = qRes.logs;
+        await updateGame({ players: pUpdates, properties: { ...gameState.properties, [spaceId]: { ownerId: p.id, houses: 0, isMortgaged: false, isLandmark: false } }, phase: 'end_turn', pendingAction: null, logs: newLogs });
+      };
+
+      const payRentOrTax = async () => {
+        const { amount, to, type } = gameState.pendingAction; let pUpdates = [...gameState.players]; let p1 = pUpdates[gameState.turnIndex];
+        if (p1.money < amount) return showAlert("請賣出資產或宣告破產！");
+        p1.money -= amount; sfx.buzzer();
+        let newLogs = gameState.logs;
+        if (type === 'rent') { 
+           let p2 = pUpdates.find(p=>p.id===to); p2.money += amount; 
+           let qRes = updateQuest(p2, 'rent_earn', 1, newLogs); p2 = qRes.p; newLogs = qRes.logs;
+           newLogs = logMsg({logs:newLogs}, `${p1.name} 付租金 $${amount} 給 ${p2.name}`).logs; 
+        }
+        await updateGame({ players: pUpdates, phase: 'end_turn', pendingAction: null, logs: newLogs });
+      };
+
+      // 攻擊世界BOSS
+      const attackBoss = async () => {
+         let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex];
+         if(p.money < 100) return showAlert("資金不足 $100");
+         p.money -= 100; sfx.coin();
+         let dmg = (Math.floor(Math.random()*6)+1 + Math.floor(Math.random()*6)+1) * 100;
+         let boss = { ...gameState.boss }; boss.hp -= dmg;
+         let newLogs = logMsg(gameState, `⚔️ ${p.name} 攻擊巨龍造成 ${dmg} 點傷害！`).logs;
+         
+         if (boss.hp <= 0) {
+            boss.active = false; boss.respawnIn = 3; p.money += 5000; p.stocksOwned.tech += 50;
+            newLogs = logMsg({logs:newLogs}, `🎉 ${p.name} 擊殺了末日巨龍！獲得 $5000 與 50 股科技股票！`).logs;
+         }
+         await updateGame({ players: pUpdates, boss, logs: newLogs });
+      };
+
+      // 道具使用與黑市功能
+      const triggerItem = async (itemId) => {
+         let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
+         if (!p.items[itemId] || p.items[itemId] <= 0) return showAlert("道具數量不足！");
+         
+         if (itemId === 'remoteDice') {
+            setModalConfig({ show: true, msg: '請選擇要擲出的點數：', customRender: () => (
+               <div className="grid grid-cols-4 gap-2 mt-4">
+                 {[2,3,4,5,6,7,8,9,10,11,12].map(n => <button key={n} onClick={async()=>{ p.items.remoteDice--; p.statusEffects.nextRoll = n; await updateGame({ players: pUpdates }); closeModal(); }} className="bg-blue-600 text-white p-2 rounded font-bold hover:bg-blue-500">{n}</button>)}
+               </div>
+            )});
+         } else if (itemId === 'turtle') {
+            setModalConfig({ show: true, msg: '選擇要陷害的玩家 (接下來3回合只能走1步)：', customRender: () => (
+               <div className="flex flex-col gap-2 mt-4">
+                 {gameState.players.filter(x=>x.id!==user.uid && !x.isBankrupt).map(target => <button key={target.id} onClick={async()=>{ p.items.turtle--; let t=pUpdates.find(x=>x.id===target.id); t.statusEffects.turtleTurns=3; await updateGame({ players: pUpdates, ...logMsg(gameState, `🐢 ${p.name} 對 ${t.name} 使用了烏龜卡！`) }); closeModal(); }} className="bg-green-600 text-white p-2 rounded font-bold">{target.name}</button>)}
+               </div>
+            )});
+         }
+      };
+
+      const doBlackMarket = async (type) => {
+         let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
+         if(type === 'kidnap') {
+            if(p.money < 1000) return showAlert("需要 $1000"); p.money -= 1000;
+            if(Math.random() < 0.2) { p.position=10; p.inJail=true; return await updateGame({players: pUpdates, ...logMsg(gameState, `🚨 買凶失敗！${p.name} 被警察抓去坐牢了！`) }); }
+            const targets = pUpdates.filter(x=>x.id!==p.id && !x.isBankrupt && !x.inJail);
+            if(targets.length===0) return showAlert("無可用目標");
+            let t = targets[Math.floor(Math.random()*targets.length)]; t.position=10; t.inJail=true;
+            await updateGame({players: pUpdates, ...logMsg(gameState, `🌑 黑市交易成功！${p.name} 買凶把 ${t.name} 綁架進了監獄！`) });
+         } else if (type === 'hack') {
+            if(p.money < 1500) return showAlert("需要 $1500"); p.money -= 1500;
+            if(Math.random() < 0.2) { p.position=10; p.inJail=true; return await updateGame({players: pUpdates, ...logMsg(gameState, `🚨 駭客被捕！${p.name} 共謀入獄！`) }); }
+            const validProps = Object.entries(gameState.properties).filter(([id, data]) => data.ownerId && data.ownerId !== p.id && !data.isLandmark);
+            if(validProps.length===0) return showAlert("對手沒有可奪取的普通土地");
+            const targetProp = validProps[Math.floor(Math.random()*validProps.length)];
+            let newProps = { ...gameState.properties }; newProps[targetProp[0]].ownerId = p.id;
+            await updateGame({players: pUpdates, properties: newProps, ...logMsg(gameState, `🌑 黑客行動成功！${p.name} 強制奪取了 ${BOARD_SPACES[targetProp[0]].name}！`) });
+         }
+      };
+
+      // 擴展面板
+      const ExpansionModal = () => {
+         const [tab, setTab] = useState('shop');
+         const me = gameState.players.find(p=>p.id===user.uid);
+         return (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4">
+               <div className="bg-gray-900 text-white p-6 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-yellow-500 shadow-2xl">
+                  <div className="flex justify-between items-center mb-4">
+                     <h2 className="text-3xl font-black text-yellow-400">🌟 混沌擴展中心</h2>
+                     <button onClick={()=>setShowExpansionModal(false)} className="text-3xl">&times;</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-4 border-b border-gray-700 pb-2">
+                     <button onClick={()=>setTab('shop')} className={`px-4 py-2 font-bold rounded ${tab==='shop'?'bg-blue-600':'bg-gray-800'}`}>🎒 道具商店</button>
+                     <button onClick={()=>setTab('blackmarket')} className={`px-4 py-2 font-bold rounded ${tab==='blackmarket'?'bg-red-900 text-red-200':'bg-gray-800'}`}>🌑 黑暗市集</button>
+                     <button onClick={()=>setTab('stock')} className={`px-4 py-2 font-bold rounded ${tab==='stock'?'bg-green-600':'bg-gray-800'}`}>📈 股票中心</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                     {tab === 'shop' && (
+                        <div className="grid grid-cols-2 gap-4">
+                           <div className="bg-gray-800 p-4 rounded-xl border border-blue-500 flex justify-between items-center">
+                              <div><h4 className="text-xl font-bold">🎲 遙控骰子 ($300)</h4><p className="text-sm text-gray-400">下次擲骰直接指定點數</p></div>
+                              <button onClick={async()=>{ if(me.money<300)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=300; p.find(x=>x.id===me.id).items.remoteDice=(me.items?.remoteDice||0)+1; await updateGame({players:p}); sfx.coin(); }} className="bg-blue-600 px-4 py-2 rounded font-bold">購買</button>
+                           </div>
+                           <div className="bg-gray-800 p-4 rounded-xl border border-green-500 flex justify-between items-center">
+                              <div><h4 className="text-xl font-bold">🐢 烏龜卡 ($500)</h4><p className="text-sm text-gray-400">指定對手接下來3次只能走1步</p></div>
+                              <button onClick={async()=>{ if(me.money<500)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=500; p.find(x=>x.id===me.id).items.turtle=(me.items?.turtle||0)+1; await updateGame({players:p}); sfx.coin(); }} className="bg-green-600 px-4 py-2 rounded font-bold">購買</button>
+                           </div>
+                        </div>
+                     )}
+                     {tab === 'blackmarket' && (
+                        <div className="space-y-4">
+                           <div className="bg-red-950/50 p-4 rounded-xl border border-red-800 flex justify-between items-center">
+                              <div><h4 className="text-xl font-bold text-red-400">🩸 買凶綁架 ($1000)</h4><p className="text-sm text-gray-400">隨機把一名對手丟進監獄！(20%失敗自己坐牢)</p></div>
+                              <button onClick={()=>doBlackMarket('kidnap')} className="bg-red-800 hover:bg-red-700 px-4 py-2 rounded font-bold">執行</button>
+                           </div>
+                           <div className="bg-red-950/50 p-4 rounded-xl border border-red-800 flex justify-between items-center">
+                              <div><h4 className="text-xl font-bold text-red-400">💻 駭客入侵 ($1500)</h4><p className="text-sm text-gray-400">強制隨機奪取對手的一塊非奇觀土地！(20%失敗坐牢)</p></div>
+                              <button onClick={()=>doBlackMarket('hack')} className="bg-red-800 hover:bg-red-700 px-4 py-2 rounded font-bold">執行</button>
+                           </div>
+                        </div>
+                     )}
+                     {tab === 'stock' && (
+                        <div className="text-gray-400 text-center py-10">股票系統維持原版運作，目前大富翁科技 ${gameState.stocks?.prices.tech} / 地產集團 ${gameState.stocks?.prices.realEstate}。<br/>請在左下方玩家面板查看持有數量。</div>
+                     )}
+                  </div>
+               </div>
+            </div>
+         );
+      };
+
+      if (!user) return <div className="min-h-screen flex items-center justify-center font-bold text-2xl text-white">連線中...</div>;
+      if (!roomId) return (
+         <div className="min-h-screen flex items-center justify-center p-4 bg-[url('https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=2071&auto=format&fit=crop')] bg-cover">
+            <div className="bg-black/80 p-8 rounded-2xl w-full max-w-md text-center text-white border-2 border-red-500 shadow-[0_0_30px_red]">
+              <h1 className="text-4xl font-black mb-2 text-red-500">終極大富翁</h1><p className="text-yellow-400 font-bold mb-6">🔥 混沌極限版 🔥</p>
+              <input type="text" placeholder="你的暱稱" value={playerName} onChange={e=>setPlayerName(e.target.value)} className="w-full px-4 py-3 rounded mb-4 text-black font-bold" />
+              <div className="flex flex-wrap gap-2 justify-center mb-6">{AVATARS.map(emoji=><button key={emoji} onClick={()=>setPlayerAvatar(emoji)} className={`text-3xl p-2 rounded ${playerAvatar===emoji?'bg-red-600':''}`}>{emoji}</button>)}</div>
+              <button onClick={handleCreateRoom} className="w-full bg-red-700 text-white font-bold py-3 rounded hover:bg-red-600 mb-4">創建新房間</button>
+              <div className="flex gap-2"><input type="text" placeholder="房間代碼" value={inputRoomCode} onChange={e=>setInputRoomCode(e.target.value.toUpperCase())} maxLength={6} className="flex-1 px-4 rounded text-black font-bold uppercase text-center" /><button onClick={handleJoinRoom} className="bg-gray-700 px-6 py-3 rounded font-bold hover:bg-gray-600">加入</button></div>
+            </div>
+         </div>
+      );
+
+      if (!gameState) return <div className="min-h-screen flex items-center justify-center text-white">讀取中...</div>;
+
+      const currentPlayer = gameState.players[gameState.turnIndex];
+      const isMyTurn = currentPlayer?.id === user.uid && !currentPlayer.isBankrupt;
+      const myPlayerData = gameState.players.find(p => p.id === user.uid);
+
+      if (gameState.status === 'lobby') return (
+         <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-2xl w-full max-w-md text-center">
+              <h2 className="text-3xl font-bold mb-2">準備大廳</h2><div className="text-4xl font-mono text-purple-700 font-black mb-6">{roomId}</div>
+              <ul className="mb-6">{gameState.players.map(p => <li key={p.id} className="text-left font-bold text-lg p-2 border-b">{p.avatar} {p.name}</li>)}</ul>
+              {!myPlayerData ? <button onClick={joinGameSlot} className="w-full bg-green-500 text-white py-3 rounded font-bold">加入</button> : (gameState.players[0].id===user.uid ? <button onClick={startGame} className="w-full bg-blue-600 text-white py-3 rounded font-bold">開始遊戲</button> : <p>等待房主開始...</p>)}
+            </div>
+         </div>
+      );
+
+      return (
+        <div className="min-h-screen p-2 md:p-4 flex flex-col lg:flex-row gap-4 max-w-[1600px] mx-auto overflow-hidden">
+          
+          {/* 左側棋盤 */}
+          <div className="flex-none bg-gray-800 p-2 rounded-xl shadow-2xl aspect-square w-full lg:w-[65vh] lg:h-[90vh] relative border-4 border-gray-900">
+            <div className="w-full h-full grid grid-cols-11 grid-rows-11 bg-gray-200 gap-[1px]">
+              {BOARD_SPACES.map((space, index) => {
+                let row, col;
+                if (index <= 10) { row = 11; col = 11 - index; } else if (index <= 20) { col = 1; row = 11 - (index - 10); } else if (index <= 30) { row = 1; col = index - 19; } else { col = 11; row = index - 29; }
+                const propData = gameState.properties[space.id];
+                const owner = propData?.ownerId ? gameState.players.find(p => p.id === propData.ownerId) : null;
+                const playersOnSpace = gameState.players.filter(p => p.position === space.id && !p.isBankrupt);
+                const hasBoss = gameState.boss?.active && gameState.boss.pos === space.id;
+
+                return (
+                  <div key={space.id} className={`flex flex-col items-center justify-between text-[0.55rem] font-bold text-center relative bg-white overflow-hidden`} style={{ gridRow: row, gridColumn: col }}>
+                    {space.color && <div className="w-full h-2 md:h-3" style={{ backgroundColor: COLOR_MAP[space.color] }}></div>}
+                    <div className="flex-grow flex flex-col items-center justify-center w-full px-0.5 z-0 leading-tight">
+                       <span>{space.name}</span>
+                       {propData?.isLandmark && <span className="text-xl">🏰</span>}
+                    </div>
+                    {owner && (
+                      <div className="absolute bottom-0 w-full h-1.5 md:h-2 flex items-center justify-center gap-[1px]" style={{ backgroundColor: owner.color }}>
+                         {!propData.isLandmark && propData.houses > 0 && Array(propData.houses).fill(0).map((_,i) => <span key={i} className="text-[6px] text-white">🏠</span>)}
+                      </div>
+                    )}
+                    {playersOnSpace.length > 0 && (
+                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-wrap justify-center gap-[1px] z-10 text-sm drop-shadow">
+                        {playersOnSpace.map(p => <span key={p.id}>{p.avatar}</span>)}
+                      </div>
+                    )}
+                    {hasBoss && <div className="absolute inset-0 flex items-center justify-center z-20 text-3xl boss-icon pointer-events-none">🐉</div>}
+                  </div>
+                );
+              })}
+
+              {/* 中央島區 */}
+              <div className="row-start-2 row-end-11 col-start-2 col-end-11 bg-gray-800 p-2 flex flex-col relative text-white">
+                 <div className="absolute inset-0 opacity-10 flex items-center justify-center text-9xl font-black pointer-events-none">CHAOS</div>
+                 
+                 {/* 濃縮日誌與系統提示跑馬燈 */}
+                 <div className="bg-black/50 p-2 rounded text-xs mb-2 overflow-hidden h-16 border border-gray-700">
+                    {gameState.logs.slice(-3).map(log => <div key={log.id} className="text-gray-300 truncate">[{log.time}] {log.text}</div>)}
+                 </div>
+
+                 {/* BOSS狀態區 */}
+                 <div className="bg-red-950/80 border border-red-600 p-2 rounded mb-2 flex justify-between items-center shadow-[0_0_10px_red]">
+                    <div className="font-bold text-red-400">🐉 世界BOSS: {gameState.boss.active ? '活躍中' : `已擊殺 (重生:${gameState.boss.respawnIn})`}</div>
+                    {gameState.boss.active && <div className="text-sm">HP: {gameState.boss.hp}/{gameState.boss.maxHp}</div>}
+                 </div>
+
+                 {/* 控制區 */}
+                 <div className="flex-1 bg-gray-900 rounded-xl p-4 border-2 flex flex-col justify-center items-center z-10 relative shadow-2xl" style={{borderColor: currentPlayer?.color || '#555'}}>
+                    <h3 className="text-xl font-black mb-4 flex items-center gap-2">{currentPlayer?.avatar} {currentPlayer?.name} 的回合</h3>
+                    
+                    <div className="flex gap-2 flex-wrap justify-center">
+                      {isMyTurn ? (
+                        <>
+                          {gameState.phase === 'waiting_roll' && <button onClick={rollDice} className="bg-blue-600 px-6 py-3 rounded-xl font-black text-lg hover:bg-blue-500 shadow-lg transform hover:scale-105 transition">🎲 {myPlayerData.statusEffects?.nextRoll ? '使用遙控骰子' : (myPlayerData.statusEffects?.turtleTurns>0 ? '烏龜爬行(走1步)' : '擲骰子')}</button>}
+                          
+                          {gameState.phase === 'must_action' && gameState.pendingAction?.type === 'buy' && (
+                             <button onClick={buyProperty} className="bg-green-600 px-6 py-3 rounded-xl font-black hover:bg-green-500">購買 (${gameState.pendingAction.amount})</button>
+                          )}
+                          {gameState.phase === 'must_action' && ['rent', 'tax'].includes(gameState.pendingAction?.type) && (
+                             <button onClick={payRentOrTax} className="bg-red-600 px-6 py-3 rounded-xl font-black hover:bg-red-500">支付 ${gameState.pendingAction.amount}</button>
+                          )}
+                          
+                          {/* 攻擊BOSS按鈕 */}
+                          {gameState.boss.active && myPlayerData.position === gameState.boss.pos && (
+                             <button onClick={attackBoss} className="bg-red-700 px-4 py-2 rounded-xl font-black border-2 border-yellow-400 animate-pulse">⚔️ 討伐巨龍 ($100)</button>
+                          )}
+
+                          {gameState.phase === 'end_turn' && <button onClick={async()=>await updateGame(passTurnToNext(gameState))} className="bg-purple-600 px-6 py-3 rounded-xl font-black hover:bg-purple-500">結束回合</button>}
+                        </>
+                      ) : <p className="text-gray-400 font-bold">等待動作中...</p>}
+                    </div>
+                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 右側資訊與操作面板 */}
+          <div className="flex-1 flex flex-col gap-2 max-h-[90vh]">
+            
+            {/* 我的專屬看板 (任務與道具) */}
+            {myPlayerData && (
+               <div className="bg-gray-800 border-2 border-yellow-600 p-3 rounded-xl shadow-lg flex flex-col gap-2">
+                  <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                     <span className="font-bold text-yellow-500">📜 當前賞金任務</span>
+                     <span className="text-sm bg-black/50 px-2 py-1 rounded text-white">{myPlayerData.quest?.desc} ({myPlayerData.quest?.progress}/{myPlayerData.quest?.target})</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                     <span className="font-bold text-blue-400 text-sm">🎒 背包:</span>
+                     <button onClick={()=>triggerItem('remoteDice')} className="bg-blue-900/50 border border-blue-500 px-2 py-1 rounded text-xs hover:bg-blue-800">遙控骰子x{myPlayerData.items?.remoteDice||0}</button>
+                     <button onClick={()=>triggerItem('turtle')} className="bg-green-900/50 border border-green-500 px-2 py-1 rounded text-xs hover:bg-green-800">烏龜卡x{myPlayerData.items?.turtle||0}</button>
+                  </div>
+               </div>
+            )}
+
+            <button onClick={() => setShowExpansionModal(true)} className="w-full bg-gradient-to-r from-red-800 to-purple-900 text-white py-3 rounded-xl font-black text-lg shadow-lg border border-red-500 hover:scale-[1.02] transition">🌟 混沌擴展中心 (商店/黑市)</button>
+            <button onClick={() => setShowManageModal(true)} className="w-full bg-blue-700 text-white py-2 rounded-xl font-bold shadow-lg hover:bg-blue-600">🏢 資產與奇觀管理</button>
+
+            {/* 玩家列表 */}
+            <div className="bg-gray-800 text-white p-3 rounded-xl flex-1 overflow-hidden flex flex-col">
+              <h2 className="text-lg font-bold mb-2 border-b border-gray-600 pb-1">玩家狀態 (第 {gameState.roundCount} 輪)</h2>
+              <div className="space-y-2 overflow-y-auto pr-1 hide-scrollbar">
+                {gameState.players.map((p, i) => (
+                   <div key={p.id} className={`p-2 rounded-lg border-l-4 bg-gray-700 relative ${p.isBankrupt?'opacity-50':''}`} style={{borderLeftColor: p.color}}>
+                     {p.statusEffects?.turtleTurns > 0 && <span className="absolute -top-2 -right-2 text-xl">🐢</span>}
+                     <div className="flex justify-between items-center">
+                       <span className="font-bold">{p.avatar} {p.name} {i === gameState.turnIndex && <span className="text-yellow-400 text-xs ml-1">回合中</span>}</span>
+                       <span className="font-bold text-green-400">💰 {p.money}</span>
+                     </div>
+                   </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="bg-gray-800 rounded-xl h-24 flex flex-col border border-gray-700 p-2">
+               <div className="flex-1 overflow-y-auto text-xs space-y-1 hide-scrollbar">
+                  {gameState.chat.map(msg=><div key={msg.id} className="text-gray-300"><span className="text-blue-400">{msg.sender}:</span> {msg.text}</div>)}
+                  <div ref={chatEndRef}/>
+               </div>
+               <form onSubmit={e=>{e.preventDefault();if(!chatInput.trim())return; updateGame({chat:[...gameState.chat,{id:Date.now(),sender:myPlayerData?.name||'觀戰',text:chatInput}].slice(-30)});setChatInput('');}} className="mt-1 flex gap-1"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-700 text-white px-2 py-1 rounded text-xs" placeholder="聊天..." /><button className="bg-blue-600 text-white px-3 rounded text-xs">送出</button></form>
+            </div>
+          </div>
+
+          {/* Modal */}
+          {modalConfig.show && (
+             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4">
+                <div className="bg-gray-800 text-white p-6 rounded-xl max-w-sm w-full text-center border-2 border-blue-500 shadow-2xl">
+                   <p className="text-lg font-bold mb-4">{modalConfig.msg}</p>
+                   {modalConfig.customRender ? modalConfig.customRender() : <button onClick={closeModal} className="px-6 py-2 bg-blue-600 rounded font-bold hover:bg-blue-500">確定</button>}
+                </div>
+             </div>
+          )}
+
+          {showExpansionModal && <ExpansionModal />}
+
+          {/* 資產管理 (包含地標升級) */}
+          {showManageModal && myPlayerData && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+               <div className="bg-gray-800 text-white p-6 rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto relative">
+                  <button onClick={() => setShowManageModal(false)} className="absolute top-4 right-4 text-3xl">&times;</button>
+                  <h3 className="text-2xl font-bold mb-4 text-blue-400">🏢 資產與奇觀管理</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                     {Object.entries(gameState.properties).filter(([_, data]) => data.ownerId === user.uid).map(([pid, data]) => {
+                        const space = BOARD_SPACES[pid];
+                        return (
+                          <div key={pid} className="border-2 rounded-xl p-3 flex flex-col bg-gray-900 border-gray-600">
+                             <div className="font-bold mb-1 truncate" style={{color: COLOR_MAP[space.color]}}>{space.name}</div>
+                             <div className="text-xs text-gray-400 mb-2 flex-grow">{data.isLandmark ? '已升級為奇觀 🏰' : `房屋: ${data.houses || 0}/5`}</div>
+                             <div className="flex flex-col gap-1">
+                                {!data.isLandmark && data.houses < 5 && <button onClick={async()=>{ if(myPlayerData.money<space.houseCost)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=space.houseCost; await updateGame({players:p, properties:{...gameState.properties,[pid]:{...data, houses:(data.houses||0)+1}}}); sfx.coin(); }} className="bg-blue-600 text-xs py-1.5 rounded hover:bg-blue-500">建房 (${space.houseCost})</button>}
+                                {!data.isLandmark && data.houses === 5 && <button onClick={async()=>{ if(myPlayerData.money<2000)return showAlert("升級奇觀需要 $2000"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=2000; await updateGame({players:p, properties:{...gameState.properties,[pid]:{...data, isLandmark:true}}}); sfx.coin(); }} className="bg-yellow-600 text-xs py-1.5 rounded font-black hover:bg-yellow-500 animate-pulse text-white">升級奇觀 ($2000)</button>}
+                             </div>
+                          </div>
+                        )
+                     })}
+                     {Object.entries(gameState.properties).filter(([_, data]) => data.ownerId === user.uid).length === 0 && <div className="col-span-full py-10 text-gray-500 text-center">沒有房產</div>}
+                  </div>
+               </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);
+  </script>
+</body>
+</html>
