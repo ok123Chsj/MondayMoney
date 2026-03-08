@@ -35,7 +35,8 @@
     const { useState, useEffect, useRef } = React;
     const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, updateDoc, onSnapshot } = window.fbInit;
 
-    const firebaseConfig = {
+    // 使用系統提供的配置，如果沒有則退回預設配置
+    const defaultFirebaseConfig = {
       apiKey: "AIzaSyDFhHbkIGkqPAmXRW2vQ0s-H33qVO2cCKg",
       authDomain: "money-5ff30.firebaseapp.com",
       projectId: "money-5ff30",
@@ -45,8 +46,17 @@
       measurementId: "G-RWXNKP0H6D"
     };
     
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
+    
     let app, auth, db, fbInitError = '';
-    try { app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); } catch(e) { fbInitError = e.message; console.error("Firebase錯誤:", e); }
+    try { 
+      app = initializeApp(firebaseConfig); 
+      auth = getAuth(app); 
+      db = getFirestore(app); 
+    } catch(e) { 
+      fbInitError = e.message; 
+      console.error("Firebase錯誤:", e); 
+    }
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'monopoly-chaos-web';
 
     const PLAYER_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#EAB308', '#A855F7'];
@@ -110,7 +120,7 @@
       logs: [{ id: Date.now(), text: '房間已創建', time: new Date().toLocaleTimeString() }], chat: [], auction: null,
       roundCount: 0, stocks: { prices: { tech: 100, realEstate: 100 }, history: { tech: [100], realEstate: [100] } },
       lottery: { pot: 1000, tickets: [], roundsLeft: 5 }, worldEvent: { type: 'normal', name: '風平浪靜', effect: '無', roundsLeft: 3 },
-      boss: { active: true, name: '末日巨龍', hp: 5000, maxHp: 5000, pos: 20, respawnIn: 0 } // 新增：世界BOSS
+      boss: { active: true, name: '末日巨龍', hp: 5000, maxHp: 5000, pos: 20, respawnIn: 0 }
     };
 
     const sfx = {
@@ -137,18 +147,30 @@
       const closeModal = () => setModalConfig({ show: false, msg: '', customRender: null });
       const logMsg = (state, text) => ({ logs: [...state.logs, { id: Date.now()+Math.random(), text, time: new Date().toLocaleTimeString() }].slice(-100) });
 
+      // 單機體驗模式
+      const handleOfflineDemo = () => {
+         if(!playerName) return showAlert("請先輸入暱稱！");
+         setRoomId('OFFLINE');
+         const demoPlayer = {
+            id: user?.uid || 'offline-user', name: playerName, color: PLAYER_COLORS[0], avatar: playerAvatar,
+            money: 1500, position: 0, inJail: false, jailTurns: 0, isBankrupt: false,
+            stocksOwned: { tech: 0, realEstate: 0 }, talents: [], god: null,
+            items: { remoteDice: 5, turtle: 5 }, quest: { ...QUEST_TYPES[0], progress: 0 }, statusEffects: {}
+         };
+         setGameState({ ...DEFAULT_GAME_STATE, status: 'playing', players: [demoPlayer], turnStartTime: Date.now() });
+      };
+
       useEffect(() => {
-        if (!auth) return;
-        const initAuth = async () => { 
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            try {
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
               await signInWithCustomToken(auth, __initial_auth_token);
-            } catch (error) {
-              console.warn("自訂 Token 驗證失敗 (因為更換了 Firebase Config)，切換為匿名登入:", error);
+            } else {
               await signInAnonymously(auth);
             }
-          } else {
-            await signInAnonymously(auth);
+          } catch (error) {
+            console.error("登入失敗，嘗試使用匿名登入:", error);
+            await signInAnonymously(auth).catch(e => console.error("匿名登入也失敗:", e));
           }
         };
         initAuth();
@@ -157,42 +179,55 @@
       }, []);
 
       useEffect(() => {
-        if (!user || !roomId || !db) return;
+        if (!user || !roomId || !db || roomId === 'OFFLINE') return;
         setDbError('');
         setLoadingText('正在尋找或建立房間...');
         
-        // 新增：超時診斷機制，5秒沒反應就直接報錯
+        let hasConnected = false;
+        
         const timeoutId = setTimeout(() => {
-           if (!gameState) {
-              setDbError('連線逾時！這通常是因為你「還沒在 Firebase 啟用 Firestore 資料庫」。\n請去 Firebase 控制台點擊「建立資料庫 (Create Database)」。');
+           if (!hasConnected) {
+              setDbError('連線逾時！Firebase 資料庫未正確回應。請確定您已啟動 Firestore。');
            }
         }, 5000);
 
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`);
+        // 修正：加入了 'rooms' 集合名稱，以滿足 Firebase 文件參考的偶數區段限制
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `monopoly_chaos_${roomId}`);
+        
         const unsub = onSnapshot(roomRef, snap => { 
-           clearTimeout(timeoutId);
            if (snap.exists()) {
+              hasConnected = true;
+              clearTimeout(timeoutId);
               setGameState(snap.data()); 
            } else {
-              setLoadingText('正在初始化遊戲資料...');
-              setDoc(roomRef, DEFAULT_GAME_STATE).catch(err => {
+              setLoadingText('正在初始化遊戲資料 (寫入中)...');
+              setDoc(roomRef, DEFAULT_GAME_STATE).then(() => {
+              }).catch(err => {
+                 hasConnected = true;
+                 clearTimeout(timeoutId);
                  console.error("建立房間失敗:", err);
-                 setDbError(`建立房間失敗：權限不足 (${err.code})。請檢查 Firestore 規則是否允許寫入！`);
+                 setDbError(`建立房間失敗：權限不足 (${err.code})。`);
               });
            }
         }, err => {
+           hasConnected = true;
            clearTimeout(timeoutId);
            console.error("監聽房間失敗:", err);
-           setDbError(`資料庫連線被拒絕 (${err.code})。請確認你已建立 Firestore 資料庫，並且設定了正確的 Rules！`);
+           setDbError(`資料庫連線被拒絕 (${err.code})。`);
         });
-        return () => { clearTimeout(timeoutId); unsub(); };
+        return () => { clearTimeout(timeoutId); if(typeof unsub === 'function') unsub(); };
       }, [user, roomId]);
 
       useEffect(() => { chatEndRef.current?.scrollIntoView(); }, [gameState?.chat]);
 
       const updateGame = async (updates) => {
+        if (roomId === 'OFFLINE') {
+           setGameState(prev => ({ ...prev, ...updates }));
+           return;
+        }
         if (!user || !roomId) return;
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`), updates).catch(console.error);
+        // 修正：加入了 'rooms' 集合名稱
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `monopoly_chaos_${roomId}`), updates).catch(console.error);
       };
 
       const handleCreateRoom = () => { if(playerName) setRoomId(Math.random().toString(36).substring(2, 6).toUpperCase()); };
@@ -205,71 +240,62 @@
           id: user.uid, name: playerName.trim(), color: PLAYER_COLORS[gameState.players.length], avatar: playerAvatar,
           money: 1500, position: 0, inJail: false, jailTurns: 0, isBankrupt: false,
           stocksOwned: { tech: 0, realEstate: 0 }, talents: [], god: null,
-          items: { remoteDice: 0, turtle: 0 }, // 裝備/道具背包
-          quest: { ...initialQuest, progress: 0 }, // 賞金任務
-          statusEffects: { turtleTurns: 0, nextRoll: null } // 異常狀態
+          items: { remoteDice: 0, turtle: 0 },
+          quest: { ...initialQuest, progress: 0 },
+          statusEffects: { turtleTurns: 0, nextRoll: null }
         };
-        await updateGame({ players: [...gameState.players, newPlayer], ...logMsg(gameState, `${newPlayer.name} 加入了房間。`) });
+        await updateGame({ players: [...gameState.players, newPlayer] });
       };
 
-      const startGame = async () => await updateGame({ status: 'playing', turnStartTime: Date.now(), ...logMsg(gameState, '遊戲開始！') });
+      const startGame = async () => {
+        if (gameState.players.length < 1) return showAlert('至少需要1名玩家');
+        await updateGame({ status: 'playing', turnStartTime: Date.now(), logs: logMsg(gameState, '遊戲開始！').logs });
+      };
 
-      // 追蹤任務進度
-      const updateQuest = (player, type, count=1, oldLogs) => {
-        if(!player.quest || player.quest.id !== type) return { p: player, logs: oldLogs };
-        player.quest.progress += count;
-        let newLogs = oldLogs;
-        if(player.quest.progress >= player.quest.target) {
-           player.money += player.quest.reward.money;
-           player.stocksOwned[player.quest.reward.stock] += 10;
-           newLogs = logMsg({logs: newLogs}, `📜 ${player.name} 完成了任務！獲得 $${player.quest.reward.money} 與 10股股票！`).logs;
-           player.quest = { ...QUEST_TYPES[Math.floor(Math.random() * QUEST_TYPES.length)], progress: 0 }; // 派發新任務
-           sfx.coin();
+      const passTurnToNext = (state) => {
+        let nextIdx = (state.turnIndex + 1) % state.players.length;
+        let p = state.players[nextIdx];
+        while (p && p.isBankrupt && state.players.filter(x=>!x.isBankrupt).length > 1) {
+          nextIdx = (nextIdx + 1) % state.players.length;
+          p = state.players[nextIdx];
         }
-        return { p: player, logs: newLogs };
-      };
+        let updates = { turnIndex: nextIdx, phase: 'waiting_roll', pendingAction: null, turnStartTime: Date.now() };
+        
+        let newRound = nextIdx <= state.turnIndex || state.players.filter(x=>!x.isBankrupt).length <= 1;
+        if(state.players.length === 1) newRound = true;
 
-      const passTurnToNext = (currentState) => {
-        let nextTurn = currentState.turnIndex; let roundWrapped = false; let safeguard = 0;
-        do { nextTurn = (nextTurn + 1) % currentState.players.length; if (nextTurn === 0) roundWrapped = true; safeguard++; } while (currentState.players[nextTurn].isBankrupt && safeguard < 10);
-
-        let updates = { turnIndex: nextTurn, phase: 'waiting_roll', doublesCount: 0, pendingAction: null, players: [...currentState.players], logs: currentState.logs };
-
-        if (roundWrapped) {
-           updates.roundCount = (currentState.roundCount || 0) + 1;
-           // 1. 神明回合扣除 & 烏龜卡扣除
-           updates.players = updates.players.map(p => {
-             if (p.god) { p.god.duration--; if (p.god.duration <= 0) p.god = null; }
-             if (p.statusEffects?.turtleTurns > 0) p.statusEffects.turtleTurns--;
-             return p;
-           });
-           // 2. 股市波動
-           let st = currentState.stocks || { prices: { tech: 100, realEstate: 100 }, history: { tech: [100], realEstate: [100] } };
-           updates.stocks = { prices: { tech: Math.max(10, Math.floor(st.prices.tech * (1 + (Math.random()*0.4-0.2)))), realEstate: Math.max(10, Math.floor(st.prices.realEstate * (1 + (Math.random()*0.4-0.2)))) }, history: st.history };
-           // 3. 世界BOSS行動
-           let boss = currentState.boss || { active: true, name: '末日巨龍', hp: 5000, maxHp: 5000, pos: 20, respawnIn: 0 };
-           if (boss.active) {
-              boss.pos = (boss.pos + Math.floor(Math.random() * 6) + 1) % 40;
-              let prop = currentState.properties[boss.pos];
-              if (prop && prop.houses > 0 && !prop.isLandmark) {
-                 updates.properties = { ...currentState.properties, [boss.pos]: { ...prop, houses: prop.houses - 1 } };
-                 updates.logs = logMsg({logs: updates.logs}, `🔥 世界BOSS 摧毀了 ${BOARD_SPACES[boss.pos].name} 的 1 棟房子！`).logs;
-              }
-           } else if (boss.respawnIn > 0) {
-              boss.respawnIn--;
-              if (boss.respawnIn === 0) { boss.active = true; boss.hp = boss.maxHp; updates.logs = logMsg({logs: updates.logs}, `🐉 末日巨龍再次降臨棋盤！`).logs; }
-           }
-           updates.boss = boss;
+        if (newRound) {
+           updates.roundCount = (state.roundCount || 0) + 1;
+           let pUpdates = [...state.players];
+           pUpdates.forEach(px => { if(px.statusEffects?.turtleTurns > 0) px.statusEffects.turtleTurns--; });
+           updates.players = pUpdates;
+           let tPrice = Math.max(10, state.stocks.prices.tech + Math.floor(Math.random()*41)-20);
+           let rPrice = Math.max(10, state.stocks.prices.realEstate + Math.floor(Math.random()*41)-20);
+           updates.stocks = { prices: { tech: tPrice, realEstate: rPrice }, history: { tech: [...state.stocks.history.tech, tPrice].slice(-10), realEstate: [...state.stocks.history.realEstate, rPrice].slice(-10) } };
         }
         return updates;
       };
 
+      const updateQuest = (p, type, amount, currentLogs) => {
+         if (!p.quest || p.quest.id !== type) return { p, logs: currentLogs };
+         p.quest.progress += amount;
+         if (p.quest.progress >= p.quest.target) {
+            p.money += p.quest.reward.money;
+            p.stocksOwned[p.quest.reward.stock] += 10;
+            currentLogs = logMsg({logs: currentLogs}, `🎉 ${p.name} 完成了賞金任務！獲得 $${p.quest.reward.money} 與 10股${p.quest.reward.stock === 'tech' ? '科技' : '地產'}股票！`).logs;
+            p.quest = { ...QUEST_TYPES[Math.floor(Math.random() * QUEST_TYPES.length)], progress: 0 };
+         }
+         return { p, logs: currentLogs };
+      };
+
       const calculateRent = (space, propData, payer, owner, diceSum) => {
-        let rent = space.type === 'property' ? space.rent[propData.houses || 0] : (space.type === 'utility' ? diceSum*4 : 25);
-        if(propData.isLandmark) rent = space.rent[5] * 2; // 奇觀地標租金翻倍
-        if(gameState.worldEvent?.type === 'boom') rent *= 1.5; if(gameState.worldEvent?.type === 'crash') rent *= 0.5;
-        if(owner.talents?.includes('charisma')) rent *= 1.3; if(payer.talents?.includes('negotiator')) rent *= 0.7;
-        if(payer.god?.type === 'poverty') rent *= 2; if(payer.god?.type === 'wealth') rent = 0;
+        if(propData.isMortgaged || payer.id === owner.id) return 0;
+        let rent = 0;
+        if(space.type === 'property') rent = space.rent[propData.isLandmark ? 5 : (propData.houses || 0)];
+        else if(space.type === 'railroad') rent = 25 * Math.pow(2, Object.values(gameState.properties).filter(p => p.ownerId === owner.id && BOARD_SPACES[p.id]?.type === 'railroad').length - 1);
+        else if(space.type === 'utility') rent = (Object.values(gameState.properties).filter(p => p.ownerId === owner.id && BOARD_SPACES[p.id]?.type === 'utility').length === 2 ? 10 : 4) * diceSum;
+        
+        if(propData.isLandmark) rent *= 2;
         return Math.ceil(rent);
       };
 
@@ -277,7 +303,6 @@
         let pIndex = gameState.turnIndex; let playerUpdates = [...gameState.players]; let player = { ...playerUpdates[pIndex] };
         let newLogs = gameState.logs; let stateUpdates = { dice: [d1, d2] };
 
-        // 清除遙控骰子狀態
         if (player.statusEffects?.nextRoll) player.statusEffects.nextRoll = null;
 
         if (player.inJail) {
@@ -298,7 +323,7 @@
         if (['property', 'railroad', 'utility'].includes(space.type)) {
           const propData = gameState.properties[space.id];
           if (!propData || !propData.ownerId) {
-            stateUpdates.pendingAction = { type: 'buy', spaceId: space.id, amount: player.god?.type==='land' ? space.price/2 : space.price };
+            stateUpdates.pendingAction = { type: 'buy', spaceId: space.id, amount: space.price };
           } else if (propData.ownerId !== player.id && !propData.isMortgaged) {
             const ownerPlayer = gameState.players.find(p => p.id === propData.ownerId);
             const rent = calculateRent(space, propData, player, ownerPlayer, d1+d2);
@@ -320,13 +345,11 @@
       const rollDice = () => {
         let p = gameState.players[gameState.turnIndex];
         if (p.statusEffects?.nextRoll) {
-           // 遙控骰子觸發
            executeRoll(Math.floor(p.statusEffects.nextRoll/2), Math.ceil(p.statusEffects.nextRoll/2));
         } else if (p.statusEffects?.turtleTurns > 0) {
-           // 烏龜卡觸發
            executeRoll(1, 0);
         } else {
-           if (gameState.phase === 'select_dice') return; // 等待選擇
+           if (gameState.phase === 'select_dice') return;
            sfx.coin(); executeRoll(Math.floor(Math.random()*6)+1, Math.floor(Math.random()*6)+1);
         }
       };
@@ -353,7 +376,6 @@
         await updateGame({ players: pUpdates, phase: 'end_turn', pendingAction: null, logs: newLogs });
       };
 
-      // 攻擊世界BOSS
       const attackBoss = async () => {
          let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex];
          if(p.money < 100) return showAlert("資金不足 $100");
@@ -369,7 +391,6 @@
          await updateGame({ players: pUpdates, boss, logs: newLogs });
       };
 
-      // 道具使用與黑市功能
       const triggerItem = async (itemId) => {
          let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
          if (!p.items[itemId] || p.items[itemId] <= 0) return showAlert("道具數量不足！");
@@ -409,7 +430,6 @@
          }
       };
 
-      // 擴展面板
       const ExpansionModal = () => {
          const [tab, setTab] = useState('shop');
          const me = gameState.players.find(p=>p.id===user.uid);
@@ -468,6 +488,11 @@
               <h1 className="text-4xl font-black mb-2 text-red-500">終極大富翁</h1><p className="text-yellow-400 font-bold mb-6">🔥 混沌極限版 🔥</p>
               <input type="text" placeholder="你的暱稱" value={playerName} onChange={e=>setPlayerName(e.target.value)} className="w-full px-4 py-3 rounded mb-4 text-black font-bold" />
               <div className="flex flex-wrap gap-2 justify-center mb-6">{AVATARS.map(emoji=><button key={emoji} onClick={()=>setPlayerAvatar(emoji)} className={`text-3xl p-2 rounded ${playerAvatar===emoji?'bg-red-600':''}`}>{emoji}</button>)}</div>
+              
+              <button onClick={handleOfflineDemo} className="w-full bg-blue-700 text-white font-bold py-3 rounded hover:bg-blue-600 mb-4 border border-blue-400 shadow-[0_0_15px_blue]">🚀 跳過連線：進入單機試玩</button>
+              
+              <div className="flex items-center gap-2 mb-4"><div className="h-px bg-gray-600 flex-1"></div><span className="text-gray-400 text-sm">多人連線區</span><div className="h-px bg-gray-600 flex-1"></div></div>
+              
               <button onClick={handleCreateRoom} className="w-full bg-red-700 text-white font-bold py-3 rounded hover:bg-red-600 mb-4">創建新房間</button>
               <div className="flex gap-2"><input type="text" placeholder="房間代碼" value={inputRoomCode} onChange={e=>setInputRoomCode(e.target.value.toUpperCase())} maxLength={6} className="flex-1 px-4 rounded text-black font-bold uppercase text-center" /><button onClick={handleJoinRoom} className="bg-gray-700 px-6 py-3 rounded font-bold hover:bg-gray-600">加入</button></div>
             </div>
@@ -480,16 +505,6 @@
                <div className="text-6xl mb-4">⚠️</div>
                <h2 className="text-2xl font-black text-red-400 mb-2">資料庫存取被拒絕</h2>
                <p className="mb-6 text-gray-300">{dbError}</p>
-               <div className="text-left bg-black/60 p-4 rounded-lg text-sm mb-6 border border-gray-700">
-                 <p className="text-yellow-400 font-bold mb-2">🔧 必做修復步驟：</p>
-                 <ol className="list-decimal list-inside space-y-2 text-gray-300">
-                   <li>前往 Firebase 控制台，左側點擊 <strong>Firestore Database</strong>。</li>
-                   <li>點擊上方的 <strong>規則 (Rules)</strong> 分頁。</li>
-                   <li>將內容全部替換為：<br/><code className="block bg-gray-800 text-green-400 p-2 mt-1 rounded text-xs">match /{"{document=**}"} {'{'} allow read, write: if true; {'}'}</code></li>
-                   <li>點擊 <strong>發布 (Publish)</strong>。</li>
-                 </ol>
-               </div>
-               <button onClick={() => window.location.reload()} className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl">已修改規則，重新整理</button>
             </div>
          </div>
       );
@@ -497,7 +512,6 @@
       if (!gameState) return (
          <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-white text-3xl font-bold animate-pulse">
             <p>{loadingText}</p>
-            <p className="text-sm text-gray-400 mt-4">如果卡住超過 5 秒，系統會自動為您診斷錯誤...</p>
          </div>
       );
 
@@ -518,7 +532,6 @@
       return (
         <div className="min-h-screen p-2 md:p-4 flex flex-col lg:flex-row gap-4 max-w-[1600px] mx-auto overflow-hidden">
           
-          {/* 左側棋盤 */}
           <div className="flex-none bg-gray-800 p-2 rounded-xl shadow-2xl aspect-square w-full lg:w-[65vh] lg:h-[90vh] relative border-4 border-gray-900">
             <div className="w-full h-full grid grid-cols-11 grid-rows-11 bg-gray-200 gap-[1px]">
               {BOARD_SPACES.map((space, index) => {
@@ -551,22 +564,18 @@
                 );
               })}
 
-              {/* 中央島區 */}
               <div className="row-start-2 row-end-11 col-start-2 col-end-11 bg-gray-800 p-2 flex flex-col relative text-white">
                  <div className="absolute inset-0 opacity-10 flex items-center justify-center text-9xl font-black pointer-events-none">CHAOS</div>
                  
-                 {/* 濃縮日誌與系統提示跑馬燈 */}
                  <div className="bg-black/50 p-2 rounded text-xs mb-2 overflow-hidden h-16 border border-gray-700">
                     {gameState.logs.slice(-3).map(log => <div key={log.id} className="text-gray-300 truncate">[{log.time}] {log.text}</div>)}
                  </div>
 
-                 {/* BOSS狀態區 */}
                  <div className="bg-red-950/80 border border-red-600 p-2 rounded mb-2 flex justify-between items-center shadow-[0_0_10px_red]">
                     <div className="font-bold text-red-400">🐉 世界BOSS: {gameState.boss.active ? '活躍中' : `已擊殺 (重生:${gameState.boss.respawnIn})`}</div>
                     {gameState.boss.active && <div className="text-sm">HP: {gameState.boss.hp}/{gameState.boss.maxHp}</div>}
                  </div>
 
-                 {/* 控制區 */}
                  <div className="flex-1 bg-gray-900 rounded-xl p-4 border-2 flex flex-col justify-center items-center z-10 relative shadow-2xl" style={{borderColor: currentPlayer?.color || '#555'}}>
                     <h3 className="text-xl font-black mb-4 flex items-center gap-2">{currentPlayer?.avatar} {currentPlayer?.name} 的回合</h3>
                     
@@ -582,7 +591,6 @@
                              <button onClick={payRentOrTax} className="bg-red-600 px-6 py-3 rounded-xl font-black hover:bg-red-500">支付 ${gameState.pendingAction.amount}</button>
                           )}
                           
-                          {/* 攻擊BOSS按鈕 */}
                           {gameState.boss.active && myPlayerData.position === gameState.boss.pos && (
                              <button onClick={attackBoss} className="bg-red-700 px-4 py-2 rounded-xl font-black border-2 border-yellow-400 animate-pulse">⚔️ 討伐巨龍 ($100)</button>
                           )}
@@ -596,10 +604,8 @@
             </div>
           </div>
 
-          {/* 右側資訊與操作面板 */}
           <div className="flex-1 flex flex-col gap-2 max-h-[90vh]">
             
-            {/* 我的專屬看板 (任務與道具) */}
             {myPlayerData && (
                <div className="bg-gray-800 border-2 border-yellow-600 p-3 rounded-xl shadow-lg flex flex-col gap-2">
                   <div className="flex justify-between items-center border-b border-gray-700 pb-2">
@@ -617,7 +623,6 @@
             <button onClick={() => setShowExpansionModal(true)} className="w-full bg-gradient-to-r from-red-800 to-purple-900 text-white py-3 rounded-xl font-black text-lg shadow-lg border border-red-500 hover:scale-[1.02] transition">🌟 混沌擴展中心 (商店/黑市)</button>
             <button onClick={() => setShowManageModal(true)} className="w-full bg-blue-700 text-white py-2 rounded-xl font-bold shadow-lg hover:bg-blue-600">🏢 資產與奇觀管理</button>
 
-            {/* 玩家列表 */}
             <div className="bg-gray-800 text-white p-3 rounded-xl flex-1 overflow-hidden flex flex-col">
               <h2 className="text-lg font-bold mb-2 border-b border-gray-600 pb-1">玩家狀態 (第 {gameState.roundCount} 輪)</h2>
               <div className="space-y-2 overflow-y-auto pr-1 hide-scrollbar">
@@ -642,7 +647,6 @@
             </div>
           </div>
 
-          {/* Modal */}
           {modalConfig.show && (
              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4">
                 <div className="bg-gray-800 text-white p-6 rounded-xl max-w-sm w-full text-center border-2 border-blue-500 shadow-2xl">
@@ -654,7 +658,6 @@
 
           {showExpansionModal && <ExpansionModal />}
 
-          {/* 資產管理 (包含地標升級) */}
           {showManageModal && myPlayerData && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
                <div className="bg-gray-800 text-white p-6 rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto relative">
