@@ -129,6 +129,7 @@
       const [showManageModal, setShowManageModal] = useState(false);
       const [modalConfig, setModalConfig] = useState({ show: false, msg: '', customRender: null });
       const [chatInput, setChatInput] = useState('');
+      const [dbError, setDbError] = useState('');
       const chatEndRef = useRef(null);
 
       const showAlert = (msg) => setModalConfig({ show: true, msg });
@@ -156,8 +157,21 @@
 
       useEffect(() => {
         if (!user || !roomId || !db) return;
+        setDbError('');
         const roomRef = doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`);
-        const unsub = onSnapshot(roomRef, snap => { if (snap.exists()) setGameState(snap.data()); else setDoc(roomRef, DEFAULT_GAME_STATE).catch(console.error); });
+        const unsub = onSnapshot(roomRef, snap => { 
+           if (snap.exists()) {
+              setGameState(snap.data()); 
+           } else {
+              setDoc(roomRef, DEFAULT_GAME_STATE).catch(err => {
+                 console.error("建立房間失敗:", err);
+                 setDbError("建立房間失敗：權限不足。請檢查 Firestore 規則是否允許寫入！");
+              });
+           }
+        }, err => {
+           console.error("監聽房間失敗:", err);
+           setDbError(`資料庫連線被拒絕 (${err.code})。請確認你已建立 Firestore 資料庫，並且設定了正確的 Rules！`);
+        });
         return () => unsub();
       }, [user, roomId]);
 
@@ -445,7 +459,27 @@
          </div>
       );
 
-      if (!gameState) return <div className="min-h-screen flex items-center justify-center text-white">讀取中...</div>;
+      if (dbError) return (
+         <div className="min-h-screen flex items-center justify-center p-4 bg-gray-900">
+            <div className="bg-red-950 border-2 border-red-500 p-8 rounded-2xl w-full max-w-lg text-center text-white shadow-[0_0_30px_red]">
+               <div className="text-6xl mb-4">⚠️</div>
+               <h2 className="text-2xl font-black text-red-400 mb-2">資料庫存取被拒絕</h2>
+               <p className="mb-6 text-gray-300">{dbError}</p>
+               <div className="text-left bg-black/60 p-4 rounded-lg text-sm mb-6 border border-gray-700">
+                 <p className="text-yellow-400 font-bold mb-2">🔧 必做修復步驟：</p>
+                 <ol className="list-decimal list-inside space-y-2 text-gray-300">
+                   <li>前往 Firebase 控制台，左側點擊 <strong>Firestore Database</strong>。</li>
+                   <li>點擊上方的 <strong>規則 (Rules)</strong> 分頁。</li>
+                   <li>將內容全部替換為：<br/><code className="block bg-gray-800 text-green-400 p-2 mt-1 rounded text-xs">match /{"{document=**}"} {'{'} allow read, write: if true; {'}'}</code></li>
+                   <li>點擊 <strong>發布 (Publish)</strong>。</li>
+                 </ol>
+               </div>
+               <button onClick={() => window.location.reload()} className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl">已修改規則，重新整理</button>
+            </div>
+         </div>
+      );
+
+      if (!gameState) return <div className="min-h-screen flex items-center justify-center text-white text-xl font-bold animate-pulse">連線至房間中...</div>;
 
       const currentPlayer = gameState.players[gameState.turnIndex];
       const isMyTurn = currentPlayer?.id === user.uid && !currentPlayer.isBankrupt;
