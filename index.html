@@ -45,8 +45,8 @@
       measurementId: "G-RWXNKP0H6D"
     };
     
-    let app, auth, db;
-    try { app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); } catch(e) {}
+    let app, auth, db, fbInitError = '';
+    try { app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app); } catch(e) { fbInitError = e.message; console.error("Firebase錯誤:", e); }
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'monopoly-chaos-web';
 
     const PLAYER_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#EAB308', '#A855F7'];
@@ -130,6 +130,7 @@
       const [modalConfig, setModalConfig] = useState({ show: false, msg: '', customRender: null });
       const [chatInput, setChatInput] = useState('');
       const [dbError, setDbError] = useState('');
+      const [loadingText, setLoadingText] = useState('連線至房間中...');
       const chatEndRef = useRef(null);
 
       const showAlert = (msg) => setModalConfig({ show: true, msg });
@@ -158,21 +159,33 @@
       useEffect(() => {
         if (!user || !roomId || !db) return;
         setDbError('');
+        setLoadingText('正在尋找或建立房間...');
+        
+        // 新增：超時診斷機制，5秒沒反應就直接報錯
+        const timeoutId = setTimeout(() => {
+           if (!gameState) {
+              setDbError('連線逾時！這通常是因為你「還沒在 Firebase 啟用 Firestore 資料庫」。\n請去 Firebase 控制台點擊「建立資料庫 (Create Database)」。');
+           }
+        }, 5000);
+
         const roomRef = doc(db, 'artifacts', appId, 'public', 'data', `monopoly_chaos_${roomId}`);
         const unsub = onSnapshot(roomRef, snap => { 
+           clearTimeout(timeoutId);
            if (snap.exists()) {
               setGameState(snap.data()); 
            } else {
+              setLoadingText('正在初始化遊戲資料...');
               setDoc(roomRef, DEFAULT_GAME_STATE).catch(err => {
                  console.error("建立房間失敗:", err);
-                 setDbError("建立房間失敗：權限不足。請檢查 Firestore 規則是否允許寫入！");
+                 setDbError(`建立房間失敗：權限不足 (${err.code})。請檢查 Firestore 規則是否允許寫入！`);
               });
            }
         }, err => {
+           clearTimeout(timeoutId);
            console.error("監聽房間失敗:", err);
            setDbError(`資料庫連線被拒絕 (${err.code})。請確認你已建立 Firestore 資料庫，並且設定了正確的 Rules！`);
         });
-        return () => unsub();
+        return () => { clearTimeout(timeoutId); unsub(); };
       }, [user, roomId]);
 
       useEffect(() => { chatEndRef.current?.scrollIntoView(); }, [gameState?.chat]);
@@ -446,7 +459,9 @@
          );
       };
 
-      if (!user) return <div className="min-h-screen flex items-center justify-center font-bold text-2xl text-white">連線中...</div>;
+      if (fbInitError) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-red-500 font-bold p-8 text-center text-xl">Firebase 初始化失敗: {fbInitError}</div>;
+
+      if (!user) return <div className="min-h-screen bg-gray-900 flex items-center justify-center font-bold text-3xl text-white">連線中...</div>;
       if (!roomId) return (
          <div className="min-h-screen flex items-center justify-center p-4 bg-[url('https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=2071&auto=format&fit=crop')] bg-cover">
             <div className="bg-black/80 p-8 rounded-2xl w-full max-w-md text-center text-white border-2 border-red-500 shadow-[0_0_30px_red]">
@@ -479,7 +494,12 @@
          </div>
       );
 
-      if (!gameState) return <div className="min-h-screen flex items-center justify-center text-white text-xl font-bold animate-pulse">連線至房間中...</div>;
+      if (!gameState) return (
+         <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-white text-3xl font-bold animate-pulse">
+            <p>{loadingText}</p>
+            <p className="text-sm text-gray-400 mt-4">如果卡住超過 5 秒，系統會自動為您診斷錯誤...</p>
+         </div>
+      );
 
       const currentPlayer = gameState.players[gameState.turnIndex];
       const isMyTurn = currentPlayer?.id === user.uid && !currentPlayer.isBankrupt;
