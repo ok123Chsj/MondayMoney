@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>終極大富翁 - 擴展巔峰版 (含全局提示)</title>
+  <title>終極大富翁 - 黑市犯罪版</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -26,13 +26,6 @@
     .player-token { animation: bounce-subtle 1.5s infinite; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5)); }
     .boss-token { animation: bounce-subtle 0.8s infinite; filter: drop-shadow(0 4px 6px rgba(220,38,38,0.6)); font-size: 1.5rem; }
     .bg-stripes { background-image: linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; }
-    
-    /* 提示彈窗動畫 */
-    @keyframes slide-down-fade {
-        0% { opacity: 0; transform: translateY(-20px); }
-        100% { opacity: 1; transform: translateY(0); }
-    }
-    .toast-enter { animation: slide-down-fade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen text-gray-900 selection:bg-blue-200">
@@ -134,7 +127,7 @@
     const appendLog = (currentChat, text) => {
         const newChat = [...(currentChat || [])];
         newChat.push({ id: Date.now() + Math.random(), sender: '系統', text, isSystem: true });
-        return newChat.slice(-50); // 延長歷史記錄到 50 條
+        return newChat.slice(-50); // 保留 50 條
     };
 
     function App() {
@@ -153,10 +146,6 @@
       const [timeLeft, setTimeLeft] = useState(60);
       
       const chatEndRef = useRef(null);
-      
-      // 全局浮動提示狀態
-      const [toasts, setToasts] = useState([]);
-      const lastLogIdRef = useRef(0);
 
       const showAlert = (msg) => setModalConfig({ show: true, msg });
       const closeModal = () => setModalConfig({ show: false, msg: '', customRender: null });
@@ -185,26 +174,6 @@
 
       // 自動滾動聊天室
       useEffect(() => { chatEndRef.current?.scrollIntoView(); }, [gameState?.chat]);
-
-      // 監聽新系統日誌並推播 Toast
-      useEffect(() => {
-         if (!gameState?.chat) return;
-         const newLogs = gameState.chat.filter(m => m.isSystem && m.id > lastLogIdRef.current);
-         if (newLogs.length > 0) {
-             lastLogIdRef.current = Math.max(...newLogs.map(m => m.id));
-             setToasts(prev => [...prev, ...newLogs].slice(-5)); // 最多顯示 5 個提示
-         } else if (gameState.chat.length > 0 && lastLogIdRef.current === 0) {
-             lastLogIdRef.current = Math.max(...gameState.chat.map(m => m.id)); // 初次載入初始化 ID
-         }
-      }, [gameState?.chat]);
-
-      // Toast 自動消失機制
-      useEffect(() => {
-         if (toasts.length > 0) {
-             const timer = setTimeout(() => { setToasts(prev => prev.slice(1)); }, 4000);
-             return () => clearTimeout(timer);
-         }
-      }, [toasts]);
 
       // Timer Logic
       useEffect(() => {
@@ -607,13 +576,105 @@
                      <button onClick={()=>setShowExpansionModal(false)} className="text-3xl text-gray-500 hover:text-black">&times;</button>
                   </div>
                   <div className="flex flex-wrap gap-2 mb-4 border-b pb-2">
-                     <button onClick={()=>setExpansionTab('stock')} className={`px-4 py-2 font-bold rounded ${expansionTab==='stock'?'bg-blue-600 text-white':'bg-gray-200'}`}>📈 股市</button>
-                     <button onClick={()=>setExpansionTab('shop')} className={`px-4 py-2 font-bold rounded ${expansionTab==='shop'?'bg-green-600 text-white':'bg-gray-200'}`}>🎒 商店</button>
-                     <button onClick={()=>setExpansionTab('bank')} className={`px-4 py-2 font-bold rounded ${expansionTab==='bank'?'bg-yellow-500 text-white':'bg-gray-200'}`}>🏦 銀行</button>
-                     <button onClick={()=>setExpansionTab('casino')} className={`px-4 py-2 font-bold rounded ${expansionTab==='casino'?'bg-purple-600 text-white':'bg-gray-200'}`}>🎰 賭場</button>
-                     <button onClick={()=>setExpansionTab('trade')} className={`px-4 py-2 font-bold rounded ${expansionTab==='trade'?'bg-orange-500 text-white':'bg-gray-200'}`}>🤝 交易</button>
+                     <button onClick={()=>setExpansionTab('stock')} className={`px-4 py-2 font-bold rounded ${expansionTab==='stock'?'bg-blue-600 text-white':'bg-gray-200 hover:bg-gray-300'}`}>📈 股市</button>
+                     <button onClick={()=>setExpansionTab('shop')} className={`px-4 py-2 font-bold rounded ${expansionTab==='shop'?'bg-green-600 text-white':'bg-gray-200 hover:bg-gray-300'}`}>🎒 商店</button>
+                     <button onClick={()=>setExpansionTab('bank')} className={`px-4 py-2 font-bold rounded ${expansionTab==='bank'?'bg-yellow-500 text-white':'bg-gray-200 hover:bg-gray-300'}`}>🏦 銀行</button>
+                     <button onClick={()=>setExpansionTab('casino')} className={`px-4 py-2 font-bold rounded ${expansionTab==='casino'?'bg-purple-600 text-white':'bg-gray-200 hover:bg-gray-300'}`}>🎰 賭場</button>
+                     <button onClick={()=>setExpansionTab('trade')} className={`px-4 py-2 font-bold rounded ${expansionTab==='trade'?'bg-orange-500 text-white':'bg-gray-200 hover:bg-gray-300'}`}>🤝 交易</button>
+                     <button onClick={()=>setExpansionTab('crime')} className={`px-4 py-2 font-bold rounded ${expansionTab==='crime'?'bg-red-700 text-white shadow-inner':'bg-gray-200 hover:bg-gray-300'}`}>🔪 黑市</button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2">
+                  <div className="flex-1 overflow-y-auto p-2 hide-scrollbar">
+                     
+                     {expansionTab === 'crime' && (
+                        <div className="space-y-4">
+                           <div className="border border-gray-800 p-6 rounded-xl bg-gray-900 text-gray-200 shadow-inner">
+                              <h3 className="text-2xl font-black text-red-500 mb-2">🔪 地下黑市</h3>
+                              <p className="text-sm text-gray-400 mb-6 font-bold">高風險，高回報。用金錢強制解決你的對手，改變戰局。</p>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                 {/* 買凶入獄 */}
+                                 <div className="bg-gray-800 p-5 rounded-xl border border-gray-700 hover:border-red-500 transition">
+                                    <h4 className="font-bold text-lg text-red-400 mb-2">🚨 買凶入獄 ($500)</h4>
+                                    <p className="text-xs text-gray-400 mb-4 h-8">直接雇用地下勢力，將一名對手綁架並強制扔進監獄！</p>
+                                    <form onSubmit={async (e) => {
+                                       e.preventDefault();
+                                       const targetId = e.target.targetId.value;
+                                       if(!targetId) return showAlert("請選擇目標！");
+                                       
+                                       let pUpdates = [...gameState.players];
+                                       let pMe = pUpdates.find(x => x.id === me.id);
+                                       let pTarget = pUpdates.find(x => x.id === targetId);
+                                       
+                                       if (pMe.money < 500) return showAlert("資金不足以支付黑市費用！");
+                                       
+                                       pMe.money -= 500;
+                                       pTarget.position = 10;
+                                       pTarget.inJail = true;
+                                       pTarget.jailTurns = 0;
+                                       
+                                       await updateGame({
+                                          players: pUpdates,
+                                          chat: appendLog(gameState.chat, `🔪 【黑市傳聞】有人暗中買凶，${pTarget.name} 在街頭遭到綁架，直接被扔進了監獄！`)
+                                       });
+                                       showAlert(`成功買凶！${pTarget.name} 已經被送入監獄。`);
+                                       e.target.reset();
+                                    }} className="flex flex-col gap-2">
+                                       <select name="targetId" className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white font-bold outline-none">
+                                          <option value="">-- 選擇目標玩家 --</option>
+                                          {gameState.players.filter(p => p.id !== me.id && !p.isBankrupt).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                       </select>
+                                       <button type="submit" className="w-full bg-red-600 text-white px-4 py-2 rounded font-bold hover:bg-red-700 transition">支付 $500 執行</button>
+                                    </form>
+                                 </div>
+
+                                 {/* 縱火破壞 */}
+                                 <div className="bg-gray-800 p-5 rounded-xl border border-gray-700 hover:border-orange-500 transition">
+                                    <h4 className="font-bold text-lg text-orange-400 mb-2">🔥 縱火破壞 ($300)</h4>
+                                    <p className="text-xs text-gray-400 mb-4 h-8">指使混混摧毀對手土地上的一棟房屋，或將奇觀降級。</p>
+                                    <form onSubmit={async (e) => {
+                                       e.preventDefault();
+                                       const propId = e.target.propId.value;
+                                       if(!propId) return showAlert("請選擇目標土地！");
+                                       
+                                       let pUpdates = [...gameState.players];
+                                       let pMe = pUpdates.find(x => x.id === me.id);
+                                       
+                                       if (pMe.money < 300) return showAlert("資金不足以支付黑市費用！");
+                                       
+                                       let propUpdates = { ...gameState.properties };
+                                       let targetProp = propUpdates[propId];
+                                       
+                                       if (targetProp.isLandmark) {
+                                          targetProp.isLandmark = false;
+                                          targetProp.houses = 4;
+                                       } else if (targetProp.houses > 0) {
+                                          targetProp.houses -= 1;
+                                       } else {
+                                          return showAlert("這塊土地上已經沒有任何建築可以破壞了！");
+                                       }
+                                       
+                                       pMe.money -= 300;
+                                       
+                                       await updateGame({
+                                          players: pUpdates,
+                                          properties: propUpdates,
+                                          chat: appendLog(gameState.chat, `🔥 【突發火警】${BOARD_SPACES[propId].name} 遭到不明人士惡意縱火，損失了建築物！`)
+                                       });
+                                       showAlert(`縱火成功！${BOARD_SPACES[propId].name} 的建築已遭到破壞。`);
+                                       e.target.reset();
+                                    }} className="flex flex-col gap-2">
+                                       <select name="propId" className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white font-bold outline-none">
+                                          <option value="">-- 選擇目標土地 --</option>
+                                          {Object.entries(gameState.properties).filter(([id, prop]) => prop.ownerId !== me.id && prop.ownerId && (prop.houses > 0 || prop.isLandmark)).map(([id, prop]) => <option key={id} value={id}>{BOARD_SPACES[id].name}</option>)}
+                                       </select>
+                                       <button type="submit" className="w-full bg-orange-600 text-white px-4 py-2 rounded font-bold hover:bg-orange-700 transition">支付 $300 執行</button>
+                                    </form>
+                                 </div>
+                              </div>
+                           </div>
+                        </div>
+                     )}
+
                      {expansionTab === 'stock' && (
                         <div className="space-y-6">
                            <p className="text-sm text-gray-500 font-bold mb-2">💡 股票分紅：每次經過起點時，可獲得 (科技股+地產股) x $2 的現金紅利！</p>
@@ -678,7 +739,7 @@
                         <div className="p-4 bg-orange-50 rounded-xl border border-orange-200">
                            <h3 className="text-xl font-bold text-orange-800 mb-4">🤝 贈與及土地轉讓</h3>
                            <form onSubmit={executeTrade} className="space-y-4">
-                              <div><label className="block text-sm font-bold text-gray-700">對象</label><select name="targetId" className="w-full p-2 border rounded font-bold bg-white">{gameState.players.filter(p=>p.id!==me.id && !p.isBankrupt).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                              <div><label className="block text-sm font-bold text-gray-700">對象</label><select name="targetId" className="w-full p-2 border rounded font-bold bg-white"><option value="">選擇目標</option>{gameState.players.filter(p=>p.id!==me.id && !p.isBankrupt).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                               <div><label className="block text-sm font-bold text-gray-700">現金 ($)</label><input type="number" name="amount" min="0" max={me.money} defaultValue="0" className="w-full p-2 border rounded font-bold bg-white" /></div>
                               <div><label className="block text-sm font-bold text-gray-700">土地</label><select name="propId" className="w-full p-2 border rounded font-bold bg-white"><option value="none">-- 不轉讓 --</option>{Object.entries(gameState.properties).filter(([_, prop])=>prop.ownerId===me.id).map(([id, prop]) => <option key={id} value={id}>{BOARD_SPACES[id].name}</option>)}</select></div>
                               <button type="submit" className="w-full bg-orange-500 text-white py-3 rounded font-bold hover:bg-orange-600">確定交易</button>
@@ -697,7 +758,7 @@
       if (!roomId) return (
          <div className="min-h-screen flex items-center justify-center p-4 bg-gray-100 bg-stripes">
             <div className="bg-white p-8 rounded-3xl w-full max-w-md text-center shadow-2xl border border-gray-200">
-              <h1 className="text-4xl font-black mb-2 text-blue-700 tracking-tight">終極大富翁</h1><p className="text-gray-500 font-bold mb-8">擴展巔峰版 🌟</p>
+              <h1 className="text-4xl font-black mb-2 text-blue-700 tracking-tight">終極大富翁</h1><p className="text-gray-500 font-bold mb-8">黑市犯罪版 🔪</p>
               <div className="space-y-4 mb-8">
                  <input type="text" placeholder="你的暱稱" value={playerName} onChange={e=>setPlayerName(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 font-bold text-center text-lg" />
                  <div className="flex flex-wrap gap-2 justify-center">{AVATARS.map(emoji=><button key={emoji} onClick={()=>setPlayerAvatar(emoji)} className={`text-3xl p-2 rounded-xl transition ${playerAvatar===emoji?'bg-blue-100 scale-110 shadow-sm':''}`}>{emoji}</button>)}</div>
@@ -730,16 +791,6 @@
       return (
         <div className="min-h-screen p-2 md:p-4 flex flex-col lg:flex-row gap-4 max-w-[1600px] mx-auto bg-white">
           
-          {/* 全局 Toast 提示組件 */}
-          <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[300] flex flex-col gap-2 w-full max-w-xl px-4 pointer-events-none">
-             {toasts.map(t => (
-                <div key={t.id} className="toast-enter bg-gray-900/90 text-white px-5 py-3 rounded-xl shadow-2xl border-l-4 border-blue-500 backdrop-blur-sm flex items-center gap-3">
-                   <span className="text-2xl drop-shadow-md">📢</span>
-                   <span className="font-bold text-[15px] leading-tight flex-1">{t.text}</span>
-                </div>
-             ))}
-          </div>
-
           <div className="flex-none bg-gray-100 p-3 rounded-2xl shadow-inner aspect-square w-full lg:w-[70vh] lg:h-[90vh] relative border border-gray-300">
             <div className="w-full h-full grid grid-cols-11 grid-rows-11 gap-[2px] bg-gray-300">
               {BOARD_SPACES.map((space, index) => {
@@ -837,7 +888,7 @@
 
           <div className="flex-1 flex flex-col gap-4 max-h-[90vh]">
             <div className="grid grid-cols-2 gap-3">
-               <button onClick={() => setShowExpansionModal(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-lg hover:shadow-xl hover:-translate-y-1 transition duration-300">🌟 擴展中心 (商城/交易)</button>
+               <button onClick={() => setShowExpansionModal(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-lg hover:shadow-xl hover:-translate-y-1 transition duration-300">🌟 擴展中心 (交易/黑市)</button>
                {myPlayerData && <button onClick={()=>setModalConfig({show:true, msg:'確定要宣告破產嗎？所有資產將會釋出。', customRender: ()=><div className="mt-4 flex gap-2"><button onClick={()=>{declareBankruptcy(); closeModal();}} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">確定破產</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-white border-2 border-red-100 text-red-600 py-4 rounded-2xl font-black text-lg shadow-sm hover:bg-red-50 transition">🏳️ 宣告破產</button>}
             </div>
 
