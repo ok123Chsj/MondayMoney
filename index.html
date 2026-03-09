@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>終極大富翁 - 白金進化版</title>
+  <title>終極大富翁 - 擴展巔峰版 (含全局提示)</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -24,7 +24,15 @@
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     @keyframes bounce-subtle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
     .player-token { animation: bounce-subtle 1.5s infinite; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5)); }
+    .boss-token { animation: bounce-subtle 0.8s infinite; filter: drop-shadow(0 4px 6px rgba(220,38,38,0.6)); font-size: 1.5rem; }
     .bg-stripes { background-image: linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; }
+    
+    /* 提示彈窗動畫 */
+    @keyframes slide-down-fade {
+        0% { opacity: 0; transform: translateY(-20px); }
+        100% { opacity: 1; transform: translateY(0); }
+    }
+    .toast-enter { animation: slide-down-fade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen text-gray-900 selection:bg-blue-200">
@@ -50,9 +58,9 @@
     const AVATARS = ['🐕', '🚗', '🎩', '🚢', '👟', '🦖', '🐧', '🚀'];
     const TALENTS = [
       { id: 'builder', name: '🏗️ 建築師', desc: '建造房屋成本減少 20%' },
-      { id: 'runner', name: '🏃 飛毛腿', desc: '擲骰子結果必定 +1' },
+      { id: 'runner', name: '🏃 飛毛腿', desc: '擲骰子必定 +1' },
       { id: 'rich', name: '💰 富二代', desc: '開局額外獲得 $1000' },
-      { id: 'investor', name: '📈 投資客', desc: '開局獲得 15 股隨機股票' }
+      { id: 'investor', name: '📈 投資客', desc: '開局獲得 15 股股票' }
     ];
     
     const WORLD_EVENTS = [
@@ -63,7 +71,7 @@
     ];
 
     const BOARD_SPACES = [
-      { id: 0, name: '起點', type: 'go', description: '經過收集 $200' },
+      { id: 0, name: '起點', type: 'go', description: '經過收集 $200 + 股票分紅' },
       { id: 1, name: '地中海大道', type: 'property', color: 'brown', price: 60, houseCost: 50, rent: [2, 10, 30, 90, 160, 250] },
       { id: 2, name: '社區基金', type: 'community' },
       { id: 3, name: '波羅的海大道', type: 'property', color: 'brown', price: 60, houseCost: 50, rent: [4, 20, 60, 180, 320, 450] },
@@ -105,7 +113,7 @@
       { id: 39, name: '木板路', type: 'property', color: 'blue', price: 400, houseCost: 200, rent: [50, 200, 600, 1400, 1700, 2000] },
     ];
 
-    const COLOR_MAP = { brown: '#8B4513', lightblue: '#87CEFA', pink: '#FF69B4', orange: '#FFA500', red: '#FF4500', yellow: '#FFD700', green: '#32CD32', blue: '#1E90FF' };
+    const COLOR_MAP = { brown: '#8B4513', lightblue: '#87CEFA', pink: '#FF69B4', orange: '#FFA500', red: '#EF4444', yellow: '#EAB308', green: '#10B981', blue: '#3B82F6' };
     const HEX_TO_RGBA = (hex, alpha) => {
        if(!hex) return 'transparent';
        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
@@ -117,9 +125,16 @@
       chat: [], roundCount: 1, turnStartTime: Date.now(),
       stocks: { prices: { tech: 100, realEstate: 100 }, history: { tech: [100], realEstate: [100] } },
       auction: { active: false, spaceId: null, currentBid: 0, highestBidder: null, endTime: 0 },
-      tradeOffer: null,
       worldEvent: WORLD_EVENTS[0],
-      lottery: { pot: 1000, tickets: [], roundsLeft: 3 }
+      lottery: { pot: 1000, tickets: [], roundsLeft: 3 },
+      boss: { active: true, name: '貪婪惡龍', avatar: '🐉', hp: 5000, maxHp: 5000, position: 20, level: 1 }
+    };
+
+    // 系統日誌小工具，負責將新提示加入聊天室歷史
+    const appendLog = (currentChat, text) => {
+        const newChat = [...(currentChat || [])];
+        newChat.push({ id: Date.now() + Math.random(), sender: '系統', text, isSystem: true });
+        return newChat.slice(-50); // 延長歷史記錄到 50 條
     };
 
     function App() {
@@ -132,10 +147,16 @@
       const [selectedTalent, setSelectedTalent] = useState(TALENTS[0].id);
       
       const [showExpansionModal, setShowExpansionModal] = useState(false);
+      const [expansionTab, setExpansionTab] = useState('stock'); 
       const [selectedSpaceId, setSelectedSpaceId] = useState(null);
       const [modalConfig, setModalConfig] = useState({ show: false, msg: '', customRender: null });
       const [timeLeft, setTimeLeft] = useState(60);
+      
       const chatEndRef = useRef(null);
+      
+      // 全局浮動提示狀態
+      const [toasts, setToasts] = useState([]);
+      const lastLogIdRef = useRef(0);
 
       const showAlert = (msg) => setModalConfig({ show: true, msg });
       const closeModal = () => setModalConfig({ show: false, msg: '', customRender: null });
@@ -162,9 +183,30 @@
         return () => unsub();
       }, [user, roomId]);
 
+      // 自動滾動聊天室
       useEffect(() => { chatEndRef.current?.scrollIntoView(); }, [gameState?.chat]);
 
-      // 計時器邏輯 (客戶端倒數)
+      // 監聽新系統日誌並推播 Toast
+      useEffect(() => {
+         if (!gameState?.chat) return;
+         const newLogs = gameState.chat.filter(m => m.isSystem && m.id > lastLogIdRef.current);
+         if (newLogs.length > 0) {
+             lastLogIdRef.current = Math.max(...newLogs.map(m => m.id));
+             setToasts(prev => [...prev, ...newLogs].slice(-5)); // 最多顯示 5 個提示
+         } else if (gameState.chat.length > 0 && lastLogIdRef.current === 0) {
+             lastLogIdRef.current = Math.max(...gameState.chat.map(m => m.id)); // 初次載入初始化 ID
+         }
+      }, [gameState?.chat]);
+
+      // Toast 自動消失機制
+      useEffect(() => {
+         if (toasts.length > 0) {
+             const timer = setTimeout(() => { setToasts(prev => prev.slice(1)); }, 4000);
+             return () => clearTimeout(timer);
+         }
+      }, [toasts]);
+
+      // Timer Logic
       useEffect(() => {
          const interval = setInterval(() => {
             if (!gameState || gameState.status !== 'playing') return;
@@ -194,8 +236,8 @@
          const demoPlayer = {
             id: user?.uid || 'offline-user', name: playerName, color: PLAYER_COLORS[0], avatar: playerAvatar,
             money: selectedTalent==='rich' ? 2500 : 1500, position: 0, inJail: false, jailTurns: 0, isBankrupt: false,
-            stocksOwned: { tech: selectedTalent==='investor'?15:0, realEstate: 0 }, items: { remoteDice: 5, turtle: 5 },
-            talent: selectedTalent, achievements: [], debt: 0
+            stocksOwned: { tech: selectedTalent==='investor'?15:0, realEstate: 0 }, items: { remoteDice: 5, turtle: 5, shield: 2 },
+            talent: selectedTalent, achievements: [], debt: 0, pet: null
          };
          setGameState({ ...DEFAULT_GAME_STATE, status: 'playing', players: [demoPlayer], turnStartTime: Date.now() });
       };
@@ -205,13 +247,16 @@
         const newPlayer = {
           id: user.uid, name: playerName.trim(), color: PLAYER_COLORS[gameState.players.length], avatar: playerAvatar,
           money: selectedTalent==='rich' ? 2500 : 1500, position: 0, inJail: false, jailTurns: 0, isBankrupt: false,
-          stocksOwned: { tech: selectedTalent==='investor'?15:0, realEstate: 0 }, items: { remoteDice: 0, turtle: 0 },
-          talent: selectedTalent, achievements: [], debt: 0, statusEffects: {}
+          stocksOwned: { tech: selectedTalent==='investor'?15:0, realEstate: 0 }, items: { remoteDice: 0, turtle: 0, shield: 0 },
+          talent: selectedTalent, achievements: [], debt: 0, pet: null, statusEffects: {}
         };
-        await updateGame({ players: [...gameState.players, newPlayer] });
+        await updateGame({ players: [...gameState.players, newPlayer], chat: appendLog(gameState.chat, `👋 ${newPlayer.name} 加入了遊戲！`) });
       };
 
       const passTurnToNext = (state) => {
+        let nextChat = [...(state.chat || [])];
+        const log = (txt) => { nextChat = appendLog(nextChat, txt); };
+
         let nextIdx = (state.turnIndex + 1) % state.players.length;
         let p = state.players[nextIdx];
         while (p && p.isBankrupt && state.players.filter(x=>!x.isBankrupt).length > 1) {
@@ -225,51 +270,63 @@
            updates.roundCount = state.roundCount + 1;
            let pUpdates = [...state.players];
            
-           // 利息結算 & 樂透 & 世界事件
+           // Lottery
            let lotteryUpdate = { ...state.lottery, roundsLeft: state.lottery.roundsLeft - 1 };
            if (lotteryUpdate.roundsLeft <= 0) {
               if (lotteryUpdate.tickets.length > 0) {
                  const winnerId = lotteryUpdate.tickets[Math.floor(Math.random()*lotteryUpdate.tickets.length)];
                  const wIdx = pUpdates.findIndex(x=>x.id===winnerId);
-                 if(wIdx !== -1) pUpdates[wIdx].money += lotteryUpdate.pot;
+                 if(wIdx !== -1) {
+                    pUpdates[wIdx].money += lotteryUpdate.pot;
+                    log(`🎟️ 國家樂透開獎！恭喜 ${pUpdates[wIdx].name} 獨得 $${lotteryUpdate.pot} 大獎！`);
+                 }
+              } else {
+                 log(`🎟️ 國家樂透開獎！本期無人購買，獎金將繼續累積！`);
               }
               lotteryUpdate = { pot: 1000, tickets: [], roundsLeft: 3 };
            }
 
+           // Debt & Effects
            pUpdates.forEach(px => { 
               if(px.statusEffects?.turtleTurns > 0) px.statusEffects.turtleTurns--; 
-              if(px.debt > 0) px.debt = Math.floor(px.debt * 1.05); // 5% 貸款利息
+              if(px.debt > 0) px.debt = Math.floor(px.debt * 1.05); 
            });
            updates.players = pUpdates;
            updates.lottery = lotteryUpdate;
 
-           // 股票波動
+           // Stocks
            let tPrice = state.stocks.prices.tech, rPrice = state.stocks.prices.realEstate;
            let tBoost = state.worldEvent.effect?.stockBoost === 'tech' ? 50 : 0;
            tPrice = Math.max(10, tPrice + Math.floor(Math.random()*41)-20 + tBoost);
            rPrice = Math.max(10, rPrice + Math.floor(Math.random()*41)-20);
            updates.stocks = { prices: { tech: tPrice, realEstate: rPrice }, history: { tech: [...state.stocks.history.tech, tPrice].slice(-10), realEstate: [...state.stocks.history.realEstate, rPrice].slice(-10) } };
+           
+           const tDiff = tPrice - state.stocks.prices.tech;
+           const rDiff = rPrice - state.stocks.prices.realEstate;
+           log(`📈 股市結算：科技股 ${tDiff>=0?'▲':'▼'}$${Math.abs(tDiff)} | 地產股 ${rDiff>=0?'▲':'▼'}$${Math.abs(rDiff)}`);
 
-           // 更新世界事件 (每4回合)
-           if (updates.roundCount % 4 === 0) updates.worldEvent = WORLD_EVENTS[Math.floor(Math.random() * WORLD_EVENTS.length)];
+           // World Event
+           if (updates.roundCount % 4 === 0) {
+              updates.worldEvent = WORLD_EVENTS[Math.floor(Math.random() * WORLD_EVENTS.length)];
+              log(`🌍 世界事件更新：${updates.worldEvent.name} - ${updates.worldEvent.desc}`);
+           }
         }
+        updates.chat = nextChat;
         return updates;
       };
 
       const forceEndTurn = async () => { await updateGame(passTurnToNext(gameState)); };
 
-      const checkAchievement = (p, type, updates) => {
-         if(!p.achievements) p.achievements = [];
-         if(type === 'first_blood' && !p.achievements.includes('first_blood')) {
-            p.achievements.push('first_blood'); p.money += 300;
-         }
-         // 其他成就可在不同情境觸發
-      };
-
       const calculateRent = (space, propData, payer, owner, diceSum) => {
         if(propData.isMortgaged || payer.id === owner.id) return 0;
         let rent = 0;
-        if(space.type === 'property') rent = space.rent[propData.isLandmark ? 5 : (propData.houses || 0)];
+        if(space.type === 'property') {
+           rent = space.rent[propData.isLandmark ? 5 : (propData.houses || 0)];
+           const colorSpaces = BOARD_SPACES.filter(s => s.color === space.color);
+           const isMonopoly = colorSpaces.every(s => gameState.properties[s.id]?.ownerId === owner.id);
+           if (isMonopoly && !propData.isLandmark && propData.houses === 0) rent *= 2;
+           else if (isMonopoly) rent = Math.floor(rent * 1.5); 
+        }
         else if(space.type === 'railroad') rent = 25 * Math.pow(2, Object.values(gameState.properties).filter(p => p.ownerId === owner.id && BOARD_SPACES[p.id]?.type === 'railroad').length - 1);
         else if(space.type === 'utility') rent = (Object.values(gameState.properties).filter(p => p.ownerId === owner.id && BOARD_SPACES[p.id]?.type === 'utility').length === 2 ? 10 : 4) * diceSum;
         
@@ -281,34 +338,71 @@
       const executeRoll = async (d1, d2) => {
         let pIndex = gameState.turnIndex; let pUpdates = [...gameState.players]; let p = { ...pUpdates[pIndex] };
         let stateUpdates = { dice: [d1, d2] };
+        let currentChat = [...gameState.chat];
+        const log = (txt) => { currentChat = appendLog(currentChat, txt); };
 
         if (p.talent === 'runner') { d1++; d2++; }
         if (p.statusEffects?.nextRoll) p.statusEffects.nextRoll = null;
 
         if (p.inJail) {
-          if (d1 === d2) { p.inJail = false; p.jailTurns = 0; }
-          else { p.jailTurns++; if(p.jailTurns >= 3) { p.money -= 50; p.inJail = false; p.jailTurns = 0; } else { pUpdates[pIndex] = p; await updateGame({ ...stateUpdates, ...passTurnToNext({ ...gameState, players: pUpdates }), players: pUpdates }); return; } }
+          if (d1 === d2) { 
+             p.inJail = false; p.jailTurns = 0; 
+             log(`🎲 ${p.name} 擲出雙骰，成功逃出監獄！`);
+          } else { 
+             p.jailTurns++; 
+             if(p.jailTurns >= 3) { 
+                p.money -= 50; p.inJail = false; p.jailTurns = 0; 
+                log(`💸 ${p.name} 刑滿釋放，支付 $50 出獄！`);
+             } else { 
+                log(`🔒 ${p.name} 擲骰失敗，繼續坐牢 (${p.jailTurns}/3 輪)`);
+                stateUpdates.chat = currentChat;
+                pUpdates[pIndex] = p; 
+                await updateGame({ ...stateUpdates, ...passTurnToNext({ ...gameState, players: pUpdates, chat: currentChat }), players: pUpdates }); 
+                return; 
+             } 
+          }
         }
 
         const oldPos = p.position; p.position = (oldPos + d1 + d2) % 40;
-        if (p.position < oldPos && p.position !== 10) p.money += 200;
+        
+        // Pass GO & Dividends & Pets
+        if (p.position < oldPos && p.position !== 10) {
+           let bonus = 200;
+           let logText = `🏁 ${p.name} 經過起點，獲得基本獎金 $200`;
+           if (p.pet === 'dog') { bonus += 300; logText += ' + 招財犬 $300'; }
+           const div = (p.stocksOwned.tech + p.stocksOwned.realEstate) * 2;
+           if (div > 0) { bonus += div; logText += ` + 股票分紅 $${div}`; }
+           p.money += bonus;
+           log(logText + '！');
+        }
 
         const space = BOARD_SPACES[p.position];
         stateUpdates.phase = 'must_action';
 
-        if (['property', 'railroad', 'utility'].includes(space.type)) {
+        if (gameState.boss?.active && p.position === gameState.boss.position) {
+           stateUpdates.pendingAction = { type: 'boss_encounter' };
+        }
+        else if (['property', 'railroad', 'utility'].includes(space.type)) {
           const propData = gameState.properties[space.id];
-          if (!propData || !propData.ownerId) stateUpdates.pendingAction = { type: 'buy', spaceId: space.id, amount: space.price };
-          else if (propData.ownerId !== p.id) {
+          if (!propData || !propData.ownerId) {
+             stateUpdates.pendingAction = { type: 'buy', spaceId: space.id, amount: space.price };
+          } else if (propData.ownerId !== p.id) {
             const ownerPlayer = gameState.players.find(x => x.id === propData.ownerId);
             const rent = calculateRent(space, propData, p, ownerPlayer, d1+d2);
-            if (rent > 0) stateUpdates.pendingAction = { type: 'rent', to: propData.ownerId, amount: rent, spaceId: space.id };
-            else stateUpdates.phase = 'end_turn';
+            if (rent > 0) {
+               stateUpdates.pendingAction = { type: 'rent', to: propData.ownerId, amount: rent, spaceId: space.id };
+            } else stateUpdates.phase = 'end_turn';
           } else stateUpdates.phase = 'end_turn';
         } else if (space.type === 'tax') stateUpdates.pendingAction = { type: 'tax', amount: space.amount };
-        else if (space.type === 'gotojail') { p.position = 10; p.inJail = true; stateUpdates = { ...stateUpdates, ...passTurnToNext({ ...gameState, players: pUpdates }) }; }
+        else if (space.type === 'gotojail') { 
+           p.position = 10; p.inJail = true; 
+           log(`👮 ${p.name} 被抓進監獄了！`);
+           stateUpdates.chat = currentChat;
+           stateUpdates = { ...stateUpdates, ...passTurnToNext({ ...gameState, players: pUpdates, chat: currentChat }) }; 
+        }
         else stateUpdates.phase = 'end_turn';
 
+        stateUpdates.chat = currentChat;
         pUpdates[pIndex] = p; await updateGame({ ...stateUpdates, players: pUpdates });
       };
 
@@ -323,10 +417,11 @@
         const { spaceId, amount } = gameState.pendingAction; let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex];
         if (p.money < amount) return showAlert("資金不足！");
         p.money -= amount;
-        await updateGame({ players: pUpdates, properties: { ...gameState.properties, [spaceId]: { ownerId: p.id, houses: 0, isLandmark: false } }, phase: 'end_turn', pendingAction: null });
+        let newChat = appendLog(gameState.chat, `🏠 ${p.name} 購買了 ${BOARD_SPACES[spaceId].name}！`);
+        await updateGame({ players: pUpdates, properties: { ...gameState.properties, [spaceId]: { ownerId: p.id, houses: 0, isLandmark: false } }, phase: 'end_turn', pendingAction: null, chat: newChat });
       };
 
-      // 拍賣系統
+      // Auction System
       const startAuction = async () => {
          const { spaceId } = gameState.pendingAction;
          await updateGame({ phase: 'auction', pendingAction: null, auction: { active: true, spaceId, currentBid: 10, highestBidder: null, endTime: Date.now() + 15000 } });
@@ -339,59 +434,88 @@
       };
       const resolveAuction = async () => {
          let updates = { auction: { active: false, spaceId: null }, phase: 'end_turn' };
+         let newChat = [...gameState.chat];
          if (gameState.auction.highestBidder) {
             let pUpdates = [...gameState.players];
             let winner = pUpdates.find(x=>x.id===gameState.auction.highestBidder);
             winner.money -= gameState.auction.currentBid;
             updates.players = pUpdates;
             updates.properties = { ...gameState.properties, [gameState.auction.spaceId]: { ownerId: winner.id, houses: 0, isLandmark: false } };
+            newChat = appendLog(newChat, `🔨 ${winner.name} 以 $${gameState.auction.currentBid} 成功標下 ${BOARD_SPACES[gameState.auction.spaceId].name}！`);
          }
+         updates.chat = newChat;
          await updateGame(updates);
       };
 
       const payRentOrTax = async () => {
-        const { amount, to, type } = gameState.pendingAction; let pUpdates = [...gameState.players]; let p1 = pUpdates[gameState.turnIndex];
+        const { amount, to, type, spaceId } = gameState.pendingAction; let pUpdates = [...gameState.players]; let p1 = pUpdates[gameState.turnIndex];
         if (p1.money < amount) return showAlert("資金不足！請考慮貸款或破產！");
         p1.money -= amount; 
+        let newChat = [...gameState.chat];
         if (type === 'rent') { 
            let p2 = pUpdates.find(x=>x.id===to); p2.money += amount; 
-           checkAchievement(p2, 'first_blood');
+           newChat = appendLog(newChat, `💸 ${p1.name} 踩到 ${p2.name} 的「${BOARD_SPACES[spaceId].name}」，支付了 $${amount} 租金！`);
+        } else if (type === 'tax') {
+           newChat = appendLog(newChat, `🏛️ ${p1.name} 依法繳交了 $${amount} 的稅金！`);
         }
-        await updateGame({ players: pUpdates, phase: 'end_turn', pendingAction: null });
+        await updateGame({ players: pUpdates, phase: 'end_turn', pendingAction: null, chat: newChat });
+      };
+
+      const useShield = async () => {
+         let pUpdates = [...gameState.players]; let p1 = pUpdates[gameState.turnIndex];
+         if ((p1.items?.shield || 0) <= 0) return;
+         p1.items.shield -= 1;
+         let newChat = appendLog(gameState.chat, `🛡️ ${p1.name} 使用了「免租護盾」，成功抵擋了 $${gameState.pendingAction.amount} 的天價租金！`);
+         await updateGame({ players: pUpdates, phase: 'end_turn', pendingAction: null, chat: newChat });
+      };
+
+      // Boss Combat
+      const attackBoss = async () => {
+         let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex];
+         if (p.money < 100) return showAlert("資金不足以攻擊");
+         p.money -= 100;
+         let dmg = (Math.floor(Math.random()*6)+1) * 300;
+         let newBoss = { ...gameState.boss, hp: gameState.boss.hp - dmg };
+         let newChat = [...gameState.chat];
+         
+         if (newBoss.hp <= 0) {
+            let bounty = newBoss.level * 2000;
+            p.money += bounty;
+            let nextPos = Math.floor(Math.random() * 40);
+            newBoss = { active: true, name: '貪婪惡龍', avatar: '🐉', hp: newBoss.maxHp + 2000, maxHp: newBoss.maxHp + 2000, position: nextPos, level: newBoss.level + 1 };
+            newChat = appendLog(newChat, `🎉 ${p.name} 擊敗了 Boss！造成 ${dmg} 傷害，獲得賞金 $${bounty}！`);
+            newChat = appendLog(newChat, `🐲 貪婪惡龍 Lv.${newBoss.level} 重生並飛到了「${BOARD_SPACES[nextPos].name}」！`);
+            showAlert(`🎉 擊敗 Boss！造成 ${dmg} 傷害，獲得賞金 $${bounty}！`);
+         } else {
+            newChat = appendLog(newChat, `⚔️ ${p.name} 對 Boss 造成 ${dmg} 傷害！(剩餘 HP: ${newBoss.hp})`);
+            showAlert(`⚔️ 對 Boss 造成 ${dmg} 傷害！`);
+         }
+         await updateGame({ phase: 'end_turn', pendingAction: null, players: pUpdates, boss: newBoss, chat: newChat });
       };
 
       const declareBankruptcy = async () => {
          let pUpdates = [...gameState.players]; let p = pUpdates[gameState.turnIndex]; p.isBankrupt = true;
          let newProps = { ...gameState.properties };
-         Object.keys(newProps).forEach(k => { if(newProps[k].ownerId === p.id) delete newProps[k]; }); // 土地釋出
-         await updateGame({ players: pUpdates, properties: newProps, ...passTurnToNext({ ...gameState, players: pUpdates }) });
+         Object.keys(newProps).forEach(k => { if(newProps[k].ownerId === p.id) delete newProps[k]; });
+         let newChat = appendLog(gameState.chat, `🏳️ ${p.name} 宣告破產了！所有資產已釋出。`);
+         await updateGame({ players: pUpdates, properties: newProps, ...passTurnToNext({ ...gameState, players: pUpdates, chat: newChat }) });
       };
 
-      const takeLoan = async () => {
-         let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
-         p.money += 1000; p.debt += 1200;
-         await updateGame({ players: pUpdates }); closeModal();
-      };
-      const repayLoan = async () => {
-         let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
-         if(p.money < p.debt) return showAlert("資金不足以還清貸款");
-         p.money -= p.debt; p.debt = 0;
-         await updateGame({ players: pUpdates }); closeModal();
-      };
-
-      // 互動式土地彈窗
+      // Interactive Property Modal
       const PropertyModal = () => {
          if(!selectedSpaceId && selectedSpaceId !== 0) return null;
          const space = BOARD_SPACES[selectedSpaceId];
          const propData = gameState.properties[space.id] || {};
          const owner = propData.ownerId ? gameState.players.find(x=>x.id===propData.ownerId) : null;
          const isMine = owner?.id === user.uid;
+         const myPlayerData = gameState.players.find(p => p.id === user.uid);
          const hCost = myPlayerData?.talent === 'builder' ? Math.floor(space.houseCost * 0.8) : space.houseCost;
+         const isMonopoly = owner && BOARD_SPACES.filter(s => s.color === space.color).every(s => gameState.properties[s.id]?.ownerId === owner.id);
 
          return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 backdrop-blur-sm" onClick={()=>setSelectedSpaceId(null)}>
-               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e=>e.stopPropagation()}>
-                  {space.color && <div className="h-16 flex items-center justify-center text-white text-2xl font-black tracking-widest" style={{backgroundColor: COLOR_MAP[space.color]}}>{space.name}</div>}
+               <div className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border-4 ${isMonopoly?'border-yellow-400 animate-pulse':'border-transparent'}`} onClick={e=>e.stopPropagation()}>
+                  {space.color && <div className="h-16 flex items-center justify-center text-white text-2xl font-black tracking-widest relative" style={{backgroundColor: COLOR_MAP[space.color]}}>{space.name}{isMonopoly && <span className="absolute top-1 right-2 text-xs bg-yellow-400 text-yellow-900 px-1 rounded">壟斷加成</span>}</div>}
                   {!space.color && <div className="h-16 bg-gray-200 flex items-center justify-center text-gray-800 text-xl font-bold">{space.name}</div>}
                   
                   <div className="p-6">
@@ -406,17 +530,15 @@
                            <div className="text-center text-xs text-gray-400 mt-2">房屋成本: ${hCost} | 奇觀升級: $2000</div>
                         </div>
                      )}
-
                      <div className="bg-gray-50 p-3 rounded-lg border text-center mb-4">
                         <span className="text-gray-500 text-sm">狀態：</span>
                         {owner ? <span className="font-bold" style={{color:owner.color}}>{owner.name} 的資產 {propData.isLandmark?'(奇觀)':`(房屋:${propData.houses||0})`}</span> : <span className="font-bold text-gray-600">無人擁有 (售價 ${space.price})</span>}
                      </div>
-
                      {isMine && !propData.isLandmark && space.type === 'property' && (
                         <div className="flex gap-2">
                            {(propData.houses||0) < 5 ? 
-                              <button onClick={async()=>{ if(myPlayerData.money<hCost)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=hCost; await updateGame({players:p, properties:{...gameState.properties,[space.id]:{...propData, houses:(propData.houses||0)+1}}}); }} className="flex-1 bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">建造房屋 (${hCost})</button>
-                            : <button onClick={async()=>{ if(myPlayerData.money<2000)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=2000; await updateGame({players:p, properties:{...gameState.properties,[space.id]:{...propData, isLandmark:true}}}); }} className="flex-1 bg-yellow-500 text-white py-2 rounded font-black hover:bg-yellow-600 shadow-lg">升級奇觀 ($2000)</button>}
+                              <button onClick={async()=>{ if(myPlayerData.money<hCost)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=hCost; await updateGame({players:p, properties:{...gameState.properties,[space.id]:{...propData, houses:(propData.houses||0)+1}}, chat: appendLog(gameState.chat, `🏗️ ${myPlayerData.name} 在「${space.name}」蓋了一棟房子！`) }); }} className="flex-1 bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">建造房屋 (${hCost})</button>
+                            : <button onClick={async()=>{ if(myPlayerData.money<2000)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=2000; await updateGame({players:p, properties:{...gameState.properties,[space.id]:{...propData, isLandmark:true}}, chat: appendLog(gameState.chat, `🏰 ${myPlayerData.name} 將「${space.name}」升級成了超級奇觀！`) }); }} className="flex-1 bg-yellow-500 text-white py-2 rounded font-black hover:bg-yellow-600 shadow-lg">升級奇觀 ($2000)</button>}
                         </div>
                      )}
                      <button onClick={()=>setSelectedSpaceId(null)} className="w-full mt-2 bg-gray-200 text-gray-800 py-2 rounded font-bold hover:bg-gray-300">關閉</button>
@@ -426,16 +548,55 @@
          );
       };
 
-      const ExpansionModal = () => {
-         const [tab, setTab] = useState('stock');
+      const renderExpansionModal = () => {
          const me = gameState.players.find(p=>p.id===user.uid);
-         
+         if (!me) return null;
+
          const tradeStock = async (type, amount, isBuy) => {
             let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
             let price = gameState.stocks.prices[type] * amount;
             if(isBuy) { if(p.money < price) return showAlert("資金不足"); p.money -= price; p.stocksOwned[type] += amount; }
             else { if(p.stocksOwned[type] < amount) return showAlert("股票不足"); p.money += price; p.stocksOwned[type] -= amount; }
             await updateGame({ players: pUpdates });
+         };
+
+         const spinCasino = async () => {
+            if(me.money < 100) return showAlert("資金不足以拉霸");
+            let pUpdates = [...gameState.players]; let p = pUpdates.find(x=>x.id===user.uid);
+            p.money -= 100;
+            const roll = Math.random();
+            let win = 0;
+            if(roll < 0.1) win = 1000; else if(roll < 0.3) win = 300; else if(roll < 0.6) win = 100;
+            p.money += win;
+            let newChat = [...gameState.chat];
+            if (win > 0) newChat = appendLog(newChat, `🎰 恭喜 ${p.name} 在皇家拉霸機贏得了 $${win}！`);
+            await updateGame({ players: pUpdates, chat: newChat });
+            showAlert(win > 0 ? `🎰 恭喜中獎！獲得 $${win}` : `💸 沒中獎，下次好運！`);
+         };
+
+         const executeTrade = async (e) => {
+            e.preventDefault();
+            const targetId = e.target.targetId.value;
+            const amount = parseInt(e.target.amount.value) || 0;
+            const propId = e.target.propId.value;
+            if (targetId === me.id) return showAlert("不能跟自己交易");
+            if (amount > me.money) return showAlert("資金不足");
+
+            let pUpdates = [...gameState.players];
+            let pMe = pUpdates.find(x=>x.id===me.id);
+            let pTarget = pUpdates.find(x=>x.id===targetId);
+            let propUpdates = { ...gameState.properties };
+
+            let msg = `🤝 ${pMe.name} 向 ${pTarget.name} `;
+            if(amount > 0) { pMe.money -= amount; pTarget.money += amount; msg += `匯款了 $${amount} `; }
+            if(propId !== "none" && propUpdates[propId]?.ownerId === me.id) {
+               propUpdates[propId].ownerId = targetId;
+               msg += (amount>0?'並':'') + `轉讓了「${BOARD_SPACES[propId].name}」`;
+            }
+            if (amount === 0 && propId === "none") return;
+            
+            await updateGame({ players: pUpdates, properties: propUpdates, chat: appendLog(gameState.chat, msg + '！') });
+            showAlert(`交易成功發送給 ${pTarget.name}`); e.target.reset();
          };
 
          return (
@@ -446,14 +607,16 @@
                      <button onClick={()=>setShowExpansionModal(false)} className="text-3xl text-gray-500 hover:text-black">&times;</button>
                   </div>
                   <div className="flex flex-wrap gap-2 mb-4 border-b pb-2">
-                     <button onClick={()=>setTab('stock')} className={`px-4 py-2 font-bold rounded ${tab==='stock'?'bg-blue-600 text-white':'bg-gray-200'}`}>📈 股市與圖表</button>
-                     <button onClick={()=>setTab('shop')} className={`px-4 py-2 font-bold rounded ${tab==='shop'?'bg-green-600 text-white':'bg-gray-200'}`}>🎒 道具商店</button>
-                     <button onClick={()=>setTab('bank')} className={`px-4 py-2 font-bold rounded ${tab==='bank'?'bg-yellow-500 text-white':'bg-gray-200'}`}>🏦 銀行與樂透</button>
+                     <button onClick={()=>setExpansionTab('stock')} className={`px-4 py-2 font-bold rounded ${expansionTab==='stock'?'bg-blue-600 text-white':'bg-gray-200'}`}>📈 股市</button>
+                     <button onClick={()=>setExpansionTab('shop')} className={`px-4 py-2 font-bold rounded ${expansionTab==='shop'?'bg-green-600 text-white':'bg-gray-200'}`}>🎒 商店</button>
+                     <button onClick={()=>setExpansionTab('bank')} className={`px-4 py-2 font-bold rounded ${expansionTab==='bank'?'bg-yellow-500 text-white':'bg-gray-200'}`}>🏦 銀行</button>
+                     <button onClick={()=>setExpansionTab('casino')} className={`px-4 py-2 font-bold rounded ${expansionTab==='casino'?'bg-purple-600 text-white':'bg-gray-200'}`}>🎰 賭場</button>
+                     <button onClick={()=>setExpansionTab('trade')} className={`px-4 py-2 font-bold rounded ${expansionTab==='trade'?'bg-orange-500 text-white':'bg-gray-200'}`}>🤝 交易</button>
                   </div>
-                  
                   <div className="flex-1 overflow-y-auto p-2">
-                     {tab === 'stock' && (
+                     {expansionTab === 'stock' && (
                         <div className="space-y-6">
+                           <p className="text-sm text-gray-500 font-bold mb-2">💡 股票分紅：每次經過起點時，可獲得 (科技股+地產股) x $2 的現金紅利！</p>
                            {['tech', 'realEstate'].map(st => {
                               const hist = gameState.stocks.history[st];
                               const maxP = Math.max(...hist, 200); const minP = Math.min(...hist, 0);
@@ -477,33 +640,49 @@
                            })}
                         </div>
                      )}
-
-                     {tab === 'shop' && (
+                     {expansionTab === 'shop' && (
                         <div className="grid grid-cols-2 gap-4">
-                           <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex justify-between items-center shadow-sm">
-                              <div><h4 className="text-lg font-bold">🎲 遙控骰子 ($300)</h4><p className="text-xs text-gray-500">下次指定點數</p></div>
-                              <button onClick={async()=>{ if(me.money<300)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=300; p.find(x=>x.id===me.id).items.remoteDice=(me.items?.remoteDice||0)+1; await updateGame({players:p}); }} className="bg-blue-600 text-white px-3 py-1 rounded font-bold">購買</button>
+                           <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm">
+                              <h4 className="text-lg font-bold">🛡️ 免租護盾 ($300)</h4><p className="text-xs text-gray-500 mb-2">踩到別人地盤可免除一次租金</p>
+                              <button onClick={async()=>{ if(me.money<300)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=300; p.find(x=>x.id===me.id).items.shield=(me.items?.shield||0)+1; await updateGame({players:p}); }} className="w-full bg-blue-600 text-white py-2 rounded font-bold">購買 (持有: {me.items?.shield||0})</button>
                            </div>
-                           <div className="bg-green-50 p-4 rounded-xl border border-green-200 flex justify-between items-center shadow-sm">
-                              <div><h4 className="text-lg font-bold">🐢 烏龜卡 ($500)</h4><p className="text-xs text-gray-500">陷害對手只能走1步</p></div>
-                              <button onClick={async()=>{ if(me.money<500)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=500; p.find(x=>x.id===me.id).items.turtle=(me.items?.turtle||0)+1; await updateGame({players:p}); }} className="bg-green-600 text-white px-3 py-1 rounded font-bold">購買</button>
+                           <div className="bg-green-50 p-4 rounded-xl border border-green-200 shadow-sm">
+                              <h4 className="text-lg font-bold">🐕 招財犬 ($800)</h4><p className="text-xs text-gray-500 mb-2">每次經過起點額外獲得 $300</p>
+                              <button onClick={async()=>{ if(me.money<800)return showAlert("資金不足"); let p=[...gameState.players]; p.find(x=>x.id===me.id).money-=800; p.find(x=>x.id===me.id).pet='dog'; await updateGame({players:p}); }} className="w-full bg-green-600 text-white py-2 rounded font-bold">{me.pet==='dog'?'已裝備':'購買裝備'}</button>
                            </div>
                         </div>
                      )}
-
-                     {tab === 'bank' && (
+                     {expansionTab === 'bank' && (
                         <div className="space-y-4">
                            <div className="border p-4 rounded-xl bg-yellow-50 flex justify-between items-center">
-                              <div><h4 className="text-lg font-bold text-yellow-800">🏦 銀行高利貸</h4><p className="text-sm text-gray-600">借款 $1000，負債 $1200 (每回合+5%利息)</p><p className="font-bold text-red-600 mt-1">目前負債: ${me.debt}</p></div>
+                              <div><h4 className="text-lg font-bold text-yellow-800">🏦 銀行高利貸</h4><p className="text-sm text-gray-600">借款 $1000，負債 $1200</p><p className="font-bold text-red-600 mt-1">目前負債: ${me.debt}</p></div>
                               <div className="flex flex-col gap-2">
-                                 <button onClick={()=>setModalConfig({show:true, msg:'確定要借款 $1000 嗎？', customRender: ()=><div className="mt-4 flex gap-2"><button onClick={takeLoan} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">確定借款</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow">借款</button>
-                                 {me.debt > 0 && <button onClick={()=>setModalConfig({show:true, msg:`確定還款 $${me.debt}？`, customRender: ()=><div className="mt-4 flex gap-2"><button onClick={repayLoan} className="flex-1 bg-green-600 text-white py-2 rounded font-bold">確定還款</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow">還款</button>}
+                                 <button onClick={()=>setModalConfig({show:true, msg:'確定要借款 $1000 嗎？', customRender: ()=><div className="mt-4 flex gap-2"><button onClick={async()=>{let p=[...gameState.players];let p1=p.find(x=>x.id===user.uid);p1.money+=1000;p1.debt+=1200;await updateGame({players:p});closeModal();}} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">確定借款</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow">借款</button>
+                                 {me.debt > 0 && <button onClick={()=>setModalConfig({show:true, msg:`確定還款 $${me.debt}？`, customRender: ()=><div className="mt-4 flex gap-2"><button onClick={async()=>{let p=[...gameState.players];let p1=p.find(x=>x.id===user.uid);if(p1.money<p1.debt)return showAlert("資金不足");p1.money-=p1.debt;p1.debt=0;await updateGame({players:p});closeModal();}} className="flex-1 bg-green-600 text-white py-2 rounded font-bold">確定還款</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow">還款</button>}
                               </div>
                            </div>
-                           <div className="border p-4 rounded-xl bg-purple-50 flex justify-between items-center">
-                              <div><h4 className="text-lg font-bold text-purple-800">🎟️ 國家幸運樂透</h4><p className="text-sm text-gray-600">目前獎金池: ${gameState.lottery.pot} | 距離開獎: {gameState.lottery.roundsLeft} 輪</p><p className="text-xs text-purple-600 mt-1">你買了 {gameState.lottery.tickets.filter(t=>t===user.uid).length} 張彩券</p></div>
-                              <button onClick={async()=>{ if(me.money<50)return showAlert("需要 $50"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=50; await updateGame({players:p, lottery:{...gameState.lottery, pot:gameState.lottery.pot+50, tickets:[...gameState.lottery.tickets, user.uid]}}); }} className="bg-purple-600 text-white px-4 py-2 rounded font-bold shadow">購買 ($50)</button>
+                           <div className="border p-4 rounded-xl bg-indigo-50 flex justify-between items-center">
+                              <div><h4 className="text-lg font-bold text-indigo-800">🎟️ 國家樂透</h4><p className="text-sm text-gray-600">目前獎池: ${gameState.lottery.pot} | 開獎: {gameState.lottery.roundsLeft} 輪後</p></div>
+                              <button onClick={async()=>{ if(me.money<50)return showAlert("需要 $50"); let p=[...gameState.players]; p.find(x=>x.id===user.uid).money-=50; await updateGame({players:p, lottery:{...gameState.lottery, pot:gameState.lottery.pot+50, tickets:[...gameState.lottery.tickets, user.uid]}}); }} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow">買彩券 ($50)</button>
                            </div>
+                        </div>
+                     )}
+                     {expansionTab === 'casino' && (
+                        <div className="flex flex-col items-center justify-center p-8 bg-purple-50 rounded-xl border border-purple-200">
+                           <h3 className="text-3xl font-black text-purple-800 mb-2">🎰 皇家拉霸機</h3>
+                           <p className="text-purple-600 mb-6 font-bold">花費 $100 試試手氣！最高可贏 $1000！</p>
+                           <button onClick={spinCasino} className="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-2xl font-black px-12 py-4 rounded-full shadow-lg hover:scale-105 transition transform">SPIN ($100)</button>
+                        </div>
+                     )}
+                     {expansionTab === 'trade' && (
+                        <div className="p-4 bg-orange-50 rounded-xl border border-orange-200">
+                           <h3 className="text-xl font-bold text-orange-800 mb-4">🤝 贈與及土地轉讓</h3>
+                           <form onSubmit={executeTrade} className="space-y-4">
+                              <div><label className="block text-sm font-bold text-gray-700">對象</label><select name="targetId" className="w-full p-2 border rounded font-bold bg-white">{gameState.players.filter(p=>p.id!==me.id && !p.isBankrupt).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                              <div><label className="block text-sm font-bold text-gray-700">現金 ($)</label><input type="number" name="amount" min="0" max={me.money} defaultValue="0" className="w-full p-2 border rounded font-bold bg-white" /></div>
+                              <div><label className="block text-sm font-bold text-gray-700">土地</label><select name="propId" className="w-full p-2 border rounded font-bold bg-white"><option value="none">-- 不轉讓 --</option>{Object.entries(gameState.properties).filter(([_, prop])=>prop.ownerId===me.id).map(([id, prop]) => <option key={id} value={id}>{BOARD_SPACES[id].name}</option>)}</select></div>
+                              <button type="submit" className="w-full bg-orange-500 text-white py-3 rounded font-bold hover:bg-orange-600">確定交易</button>
+                           </form>
                         </div>
                      )}
                   </div>
@@ -512,22 +691,18 @@
          );
       };
 
-      if (fbInitError) return <div className="min-h-screen bg-white flex items-center justify-center text-red-500 font-bold p-8 text-xl">Firebase 錯誤: {fbInitError}</div>;
+      if (fbInitError) return <div className="min-h-screen bg-white flex items-center justify-center text-red-500 font-bold p-8 text-xl">Firebase Error: {fbInitError}</div>;
       if (!user) return <div className="min-h-screen bg-white flex items-center justify-center font-bold text-3xl text-gray-800 animate-pulse">連線中...</div>;
       
       if (!roomId) return (
          <div className="min-h-screen flex items-center justify-center p-4 bg-gray-100 bg-stripes">
             <div className="bg-white p-8 rounded-3xl w-full max-w-md text-center shadow-2xl border border-gray-200">
-              <h1 className="text-4xl font-black mb-2 text-blue-700 tracking-tight">終極大富翁</h1><p className="text-gray-500 font-bold mb-8">白金進化版 💎</p>
-              
+              <h1 className="text-4xl font-black mb-2 text-blue-700 tracking-tight">終極大富翁</h1><p className="text-gray-500 font-bold mb-8">擴展巔峰版 🌟</p>
               <div className="space-y-4 mb-8">
-                 <input type="text" placeholder="你的暱稱" value={playerName} onChange={e=>setPlayerName(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-center text-lg" />
+                 <input type="text" placeholder="你的暱稱" value={playerName} onChange={e=>setPlayerName(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 font-bold text-center text-lg" />
                  <div className="flex flex-wrap gap-2 justify-center">{AVATARS.map(emoji=><button key={emoji} onClick={()=>setPlayerAvatar(emoji)} className={`text-3xl p-2 rounded-xl transition ${playerAvatar===emoji?'bg-blue-100 scale-110 shadow-sm':''}`}>{emoji}</button>)}</div>
-                 <select value={selectedTalent} onChange={e=>setSelectedTalent(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 font-bold">
-                    {TALENTS.map(t => <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>)}
-                 </select>
+                 <select value={selectedTalent} onChange={e=>setSelectedTalent(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 font-bold">{TALENTS.map(t => <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>)}</select>
               </div>
-              
               <button onClick={handleOfflineDemo} className="w-full bg-gray-800 text-white font-bold py-3 rounded-xl hover:bg-gray-700 mb-6 shadow-md transition">🚀 單機試玩</button>
               <div className="flex items-center gap-4 mb-6"><div className="h-px bg-gray-200 flex-1"></div><span className="text-gray-400 text-sm font-bold">多人連線</span><div className="h-px bg-gray-200 flex-1"></div></div>
               <button onClick={()=>{if(playerName)setRoomId(Math.random().toString(36).substring(2,6).toUpperCase())}} className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 mb-4 shadow-md transition">創建新房間</button>
@@ -555,6 +730,16 @@
       return (
         <div className="min-h-screen p-2 md:p-4 flex flex-col lg:flex-row gap-4 max-w-[1600px] mx-auto bg-white">
           
+          {/* 全局 Toast 提示組件 */}
+          <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[300] flex flex-col gap-2 w-full max-w-xl px-4 pointer-events-none">
+             {toasts.map(t => (
+                <div key={t.id} className="toast-enter bg-gray-900/90 text-white px-5 py-3 rounded-xl shadow-2xl border-l-4 border-blue-500 backdrop-blur-sm flex items-center gap-3">
+                   <span className="text-2xl drop-shadow-md">📢</span>
+                   <span className="font-bold text-[15px] leading-tight flex-1">{t.text}</span>
+                </div>
+             ))}
+          </div>
+
           <div className="flex-none bg-gray-100 p-3 rounded-2xl shadow-inner aspect-square w-full lg:w-[70vh] lg:h-[90vh] relative border border-gray-300">
             <div className="w-full h-full grid grid-cols-11 grid-rows-11 gap-[2px] bg-gray-300">
               {BOARD_SPACES.map((space, index) => {
@@ -564,9 +749,10 @@
                 const owner = propData?.ownerId ? gameState.players.find(p => p.id === propData.ownerId) : null;
                 const playersOnSpace = gameState.players.filter(p => p.position === space.id && !p.isBankrupt);
                 const bgStyle = owner ? { backgroundColor: HEX_TO_RGBA(owner.color, 0.15) } : { backgroundColor: '#ffffff' };
+                const isMonopoly = owner && BOARD_SPACES.filter(s => s.color === space.color).every(s => gameState.properties[s.id]?.ownerId === owner.id);
 
                 return (
-                  <div key={space.id} onClick={()=>setSelectedSpaceId(space.id)} className={`flex flex-col items-center justify-between text-[0.6rem] font-bold text-center relative overflow-hidden cursor-pointer hover:brightness-95 transition`} style={{ gridRow: row, gridColumn: col, ...bgStyle }}>
+                  <div key={space.id} onClick={()=>setSelectedSpaceId(space.id)} className={`flex flex-col items-center justify-between text-[0.6rem] font-bold text-center relative overflow-hidden cursor-pointer hover:brightness-95 transition ${isMonopoly?'ring-inset ring-2 ring-yellow-400':''}`} style={{ gridRow: row, gridColumn: col, ...bgStyle }}>
                     {space.color && <div className="w-full h-3 md:h-4 shadow-sm" style={{ backgroundColor: COLOR_MAP[space.color] }}></div>}
                     <div className="flex-grow flex flex-col items-center justify-center w-full px-0.5 z-0 leading-tight text-gray-800">
                        <span>{space.name}</span>
@@ -577,17 +763,15 @@
                          {!propData.isLandmark && propData.houses > 0 && Array(propData.houses).fill(0).map((_,i) => <div key={i} className="w-1.5 h-1.5 bg-white rounded-full"></div>)}
                       </div>
                     )}
-                    {playersOnSpace.length > 0 && (
-                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-wrap justify-center gap-[1px] z-10 text-base md:text-xl player-token">
+                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-wrap justify-center gap-[1px] z-10 text-base md:text-xl player-token w-full pointer-events-none">
                         {playersOnSpace.map(p => <span key={p.id}>{p.avatar}</span>)}
-                      </div>
-                    )}
+                        {gameState.boss?.active && gameState.boss.position === space.id && <span className="boss-token relative group">{gameState.boss.avatar}<span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] bg-red-600 text-white px-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition">HP: {gameState.boss.hp}</span></span>}
+                    </div>
                   </div>
                 );
               })}
 
               <div className="row-start-2 row-end-11 col-start-2 col-end-11 bg-gray-50 p-4 flex flex-col items-center justify-center relative rounded-xl m-1 shadow-inner border border-gray-200">
-                 
                  <div className="absolute top-4 flex flex-col items-center">
                     <div className="text-sm font-bold text-gray-400 tracking-widest">WORLD EVENT</div>
                     <div className="text-2xl font-black text-gray-800 bg-white px-4 py-1 rounded-full shadow border border-gray-100">{gameState.worldEvent.name}</div>
@@ -609,7 +793,20 @@
                       )}
                       
                       {isMyTurn && gameState.phase === 'must_action' && ['rent', 'tax'].includes(gameState.pendingAction?.type) && (
-                         <button onClick={payRentOrTax} className="w-full bg-red-600 text-white py-3 rounded-xl font-black hover:bg-red-700">支付 ${gameState.pendingAction.amount}</button>
+                         <div className="flex flex-col gap-2">
+                            <button onClick={payRentOrTax} className="w-full bg-red-600 text-white py-3 rounded-xl font-black hover:bg-red-700">支付 ${gameState.pendingAction.amount}</button>
+                            {gameState.pendingAction.type === 'rent' && (myPlayerData?.items?.shield > 0) && (
+                               <button onClick={useShield} className="w-full bg-indigo-600 text-white py-2 rounded-xl font-bold hover:bg-indigo-700">🛡️ 使用免租護盾 (餘: {myPlayerData.items.shield})</button>
+                            )}
+                         </div>
+                      )}
+
+                      {isMyTurn && gameState.phase === 'must_action' && gameState.pendingAction?.type === 'boss_encounter' && (
+                         <div className="flex flex-col gap-2 animate-pulse">
+                            <div className="text-center font-bold text-red-600 mb-2">遇見 {gameState.boss.name} (HP: {gameState.boss.hp})</div>
+                            <button onClick={attackBoss} className="w-full bg-red-600 text-white py-3 rounded-xl font-black hover:bg-red-700">⚔️ 攻擊 ($100)</button>
+                            <button onClick={async()=>await updateGame({phase:'end_turn', pendingAction:null, chat: appendLog(gameState.chat, `🏃 ${myPlayerData.name} 選擇不攻擊 Boss，直接逃離了。`)})} className="w-full bg-gray-500 text-white py-2 rounded-xl font-black hover:bg-gray-600">🏃 逃離</button>
+                         </div>
                       )}
 
                       {isMyTurn && gameState.phase === 'end_turn' && <button onClick={forceEndTurn} className="w-full bg-gray-800 text-white py-3 rounded-xl font-black hover:bg-gray-700 shadow-md">結束回合 ({timeLeft}s)</button>}
@@ -634,15 +831,13 @@
                        </div>
                     </div>
                  )}
-
               </div>
             </div>
           </div>
 
           <div className="flex-1 flex flex-col gap-4 max-h-[90vh]">
-            
             <div className="grid grid-cols-2 gap-3">
-               <button onClick={() => setShowExpansionModal(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-lg hover:shadow-xl hover:-translate-y-1 transition duration-300">🌟 擴展中心 (股市/道具)</button>
+               <button onClick={() => setShowExpansionModal(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-lg hover:shadow-xl hover:-translate-y-1 transition duration-300">🌟 擴展中心 (商城/交易)</button>
                {myPlayerData && <button onClick={()=>setModalConfig({show:true, msg:'確定要宣告破產嗎？所有資產將會釋出。', customRender: ()=><div className="mt-4 flex gap-2"><button onClick={()=>{declareBankruptcy(); closeModal();}} className="flex-1 bg-red-600 text-white py-2 rounded font-bold">確定破產</button><button onClick={closeModal} className="flex-1 bg-gray-300 py-2 rounded font-bold">取消</button></div>})} className="bg-white border-2 border-red-100 text-red-600 py-4 rounded-2xl font-black text-lg shadow-sm hover:bg-red-50 transition">🏳️ 宣告破產</button>}
             </div>
 
@@ -658,7 +853,8 @@
                        <span className="font-black text-lg flex items-center gap-2">
                           <span className="text-2xl">{p.avatar}</span> {p.name} 
                           {i === gameState.turnIndex && <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded-full ml-1 animate-pulse">回合中</span>}
-                          {p.statusEffects?.turtleTurns > 0 && <span className="text-sm ml-1">🐢</span>}
+                          {p.pet === 'dog' && <span className="text-sm ml-1" title="招財犬">🐕</span>}
+                          {p.items?.shield > 0 && <span className="text-sm ml-1 text-blue-500" title="免租護盾">🛡️x{p.items.shield}</span>}
                        </span>
                        <span className="font-black text-green-600 text-xl tracking-tight">💰 {p.money}</span>
                      </div>
@@ -667,27 +863,31 @@
                         <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded">科技: {p.stocksOwned?.tech||0}</span>
                         <span className="bg-green-50 text-green-700 px-2 py-1 rounded">地產: {p.stocksOwned?.realEstate||0}</span>
                         {p.debt > 0 && <span className="bg-red-50 text-red-600 px-2 py-1 rounded">負債: ${p.debt}</span>}
-                        {p.achievements?.map(a => <span key={a} className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded">🏆 {a==='first_blood'?'首殺':a}</span>)}
                      </div>
                    </div>
                 ))}
               </div>
             </div>
             
-            <div className="bg-white rounded-2xl h-32 flex flex-col shadow-sm border border-gray-100 p-3">
-               <div className="flex-1 overflow-y-auto text-sm space-y-1.5 hide-scrollbar mb-2 font-medium">
-                  {gameState.chat.map(msg=><div key={msg.id} className="text-gray-600"><span className="text-gray-900 font-bold">{msg.sender}:</span> {msg.text}</div>)}
+            <div className="bg-white rounded-2xl h-40 flex flex-col shadow-sm border border-gray-100 p-3">
+               <div className="flex-1 overflow-y-auto text-sm space-y-2 hide-scrollbar mb-2 font-medium bg-gray-50/50 p-2 rounded-xl">
+                  {gameState.chat.map(msg=>(
+                     <div key={msg.id} className={`${msg.isSystem ? 'bg-blue-50 text-blue-800 border-l-2 border-blue-400 px-2 py-1.5 rounded-r shadow-sm font-bold' : 'text-gray-600'}`}>
+                        <span className={msg.isSystem ? "hidden" : "text-gray-900 font-black mr-1"}>{msg.sender}:</span>
+                        {msg.text}
+                     </div>
+                  ))}
                   <div ref={chatEndRef}/>
                </div>
-               <form onSubmit={e=>{e.preventDefault();const input=e.target.elements[0].value; if(!input.trim())return; updateGame({chat:[...gameState.chat,{id:Date.now(),sender:myPlayerData?.name||'觀戰',text:input}].slice(-30)}); e.target.reset();}} className="flex gap-2">
-                  <input className="flex-1 bg-gray-50 border border-gray-200 text-gray-800 px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition" placeholder="輸入訊息..." />
+               <form onSubmit={e=>{e.preventDefault();const input=e.target.elements[0].value; if(!input.trim())return; updateGame({chat:[...gameState.chat,{id:Date.now(),sender:myPlayerData?.name||'觀戰',text:input, isSystem:false}].slice(-50)}); e.target.reset();}} className="flex gap-2">
+                  <input className="flex-1 bg-gray-50 border border-gray-200 text-gray-800 px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition" placeholder="輸入聊天訊息..." />
                   <button className="bg-gray-800 text-white px-4 rounded-xl text-sm font-bold hover:bg-gray-700 transition">發送</button>
                </form>
             </div>
           </div>
 
           <PropertyModal />
-          {showExpansionModal && <ExpansionModal />}
+          {showExpansionModal && renderExpansionModal()}
 
           {modalConfig.show && (
              <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[200] p-4 backdrop-blur-sm">
@@ -697,7 +897,6 @@
                 </div>
              </div>
           )}
-
         </div>
       );
     }
